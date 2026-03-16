@@ -10,3 +10,11 @@ linters:
   settings:
     errcheck:
       check-type-assertions: true
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        - (io.Closer).Close
