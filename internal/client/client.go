@@ -106,6 +106,6 @@ func (c *RouterOSClient) Run(ctx context.Context, command string, args ...string
 
 // Close closes the underlying connection to the RouterOS device.
 func (c *RouterOSClient) Close() error {
-	c.conn.Close()
+	c.conn.Close() //nolint:errcheck // routeros.Client.Close is void
 	return nil
 }

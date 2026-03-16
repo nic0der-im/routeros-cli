@@ -140,7 +140,7 @@ func newSystemRebootCmd() *cobra.Command {
 			if !force {
 				fmt.Fprint(os.Stderr, "Reboot device? [y/N] ")
 				var answer string
-				fmt.Scanln(&answer)
+				_, _ = fmt.Scanln(&answer)
 				if answer != "y" && answer != "Y" {
 					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
 					return

@@ -167,7 +167,7 @@ func runMonitor(cmdInstance *cobra.Command, rosCommand string, fn func(ctx conte
 		a.renderError(os.Stderr, "connection_failed", err.Error(), deviceName)
 		os.Exit(ExitConnError)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if err := fn(ctx, a, c, deviceName); err != nil {
 		// Context cancellation from SIGINT is not an error worth reporting.
