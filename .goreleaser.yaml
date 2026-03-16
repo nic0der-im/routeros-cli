@@ -31,22 +31,18 @@ archives:
       - README.md
       - LICENSE
 
-brews:
-  - repository:
-      owner: nic0der-im
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
-    homepage: "https://github.com/nic0der-im/routeros-cli"
-    description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
-    license: "MIT"
-    install: |
-      bin.install "routeros-cli"
-    test: |
-      assert_match "routeros-cli", shell_output("#{bin}/routeros-cli version")
-    caveats: |
-      To get started, add a router:
-        echo 'password' | routeros-cli device add myrouter --address 192.168.88.1:8728 --username admin --tls=false --password-stdin
+# Uncomment after creating nic0der-im/homebrew-tap repo and HOMEBREW_TAP_TOKEN secret:
+# brews:
+#   - repository:
+#       owner: nic0der-im
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     directory: Formula
+#     homepage: "https://github.com/nic0der-im/routeros-cli"
+#     description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
+#     license: "MIT"
+#     install: |
+#       bin.install "routeros-cli"
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
@@ -55,7 +51,6 @@ checksum:
 changelog:
   use: git
   sort: asc
-  skip_merge_commits: true
   groups:
     - title: Features
       regexp: '^.*?feat(\(.+\))?!?:.+$'
