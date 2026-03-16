@@ -1,0 +1,77 @@
+version: 2
+
+project_name: routeros-cli
+
+builds:
+  - id: default
+    main: .
+    binary: routeros-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - "7"
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+brews:
+  - repository:
+      owner: nic0der-im
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/nic0der-im/routeros-cli"
+    description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
+    license: "MIT"
+    install: |
+      bin.install "routeros-cli"
+    test: |
+      assert_match "routeros-cli", shell_output("#{bin}/routeros-cli version")
+    caveats: |
+      To get started, add a router:
+        echo 'password' | routeros-cli device add myrouter --address 192.168.88.1:8728 --username admin --tls=false --password-stdin
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  skip_merge_commits: true
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))?!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))?!?:.+$'
+      order: 2
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge remote-tracking branch

@@ -1,0 +1,17 @@
+# Binaries
+routeros-cli
+*.exe
+dist/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
