@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] — 2026-07-29
+
+### Fixed
+- `session watch` retries auto-rollback after the link recovers (does not exit on the first failed reconnect)
+- Watch reloads device inventory on each probe/rollback
+- Omit `creation-time` from remove→add inverse restores
+
 ## [0.3.0] — 2026-07-29
 
 ### Added

@@ -8,8 +8,9 @@ var readOnlyKeys = map[string]struct{}{
 	"running": {}, "slave": {}, "inactive": {}, "actual-interface": {},
 	"active-address": {}, "active-mac-address": {}, "active-client-id": {},
 	"active-server": {}, "expires-after": {}, "last-seen": {}, "status": {},
-	"last-logged-in": {}, "radius": {},
+	"last-logged-in": {}, "radius": {}, "creation-time": {},
 }
+
 
 // IsReadOnlyField reports whether a printed field should be omitted from restore args.
 func IsReadOnlyField(key string) bool {

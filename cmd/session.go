@@ -193,7 +193,12 @@ over the binary API).`,
 				Interval:      interval,
 				FailThreshold: fails,
 				Probe: func(pctx context.Context) error {
-					c, _, err := a.connect(pctx)
+					// Reload inventory each probe so address/VPN changes are picked up.
+					fresh, err := loadApp()
+					if err != nil {
+						return err
+					}
+					c, _, err := fresh.connect(pctx)
 					if err != nil {
 						return err
 					}
@@ -202,25 +207,29 @@ over the binary API).`,
 					return err
 				},
 				Rollback: func(rctx context.Context, s *session.Session) error {
-					c, _, err := a.connect(rctx)
+					fresh, err := loadApp()
+					if err != nil {
+						return err
+					}
+					c, _, err := fresh.connect(rctx)
 					if err != nil {
 						return err
 					}
 					defer func() { _ = c.Close() }()
-					return applySessionRollback(rctx, a, c, s, cmd.OutOrStdout())
+					return applySessionRollback(rctx, fresh, c, s, cmd.OutOrStdout())
 				},
 				OnLinkLost: func(s *session.Session) {
-					fmt.Fprintf(cmd.OutOrStdout(), "Link lost — auto-rollback pending for session %s\n", s.ID)
+					fmt.Fprintf(cmd.OutOrStdout(), "Link lost — auto-rollback pending for session %s (will retry when reachable)\n", s.ID)
 				},
 				OnRolledBack: func(s *session.Session, rbErr error) {
 					if rbErr != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Auto-rollback failed: %v\n", rbErr)
+						fmt.Fprintf(cmd.ErrOrStderr(), "Auto-rollback attempt failed (will retry): %v\n", rbErr)
 						return
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "Auto-rolled back session %s\n", s.ID)
 				},
 			})
-			if err != nil && err != context.Canceled {
+			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
 				a.renderError(os.Stderr, "session_error", err.Error(), name)
 				os.Exit(ExitCmdError)
 			}
