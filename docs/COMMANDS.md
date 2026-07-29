@@ -47,9 +47,11 @@ ros device auth set <name>
 ros device list|get|use|test|remove
 ros device discover                     # MNDP neighbors via current device
 ros device import --from winbox [--file ...] [--dry-run] [--with-passwords] [--force]
+               [--api-port 8728] [--keep-winbox-port]
 ```
 
 Winbox import auto-detects OS paths (macOS/Linux/Windows) for Winbox 4 `Addresses.cdb` and Winbox 3 `.WBX`.
+By default `--api-port 8728` is applied to every host (Winbox GUI ports are ignored).
 
 ## Diagnostics
 
@@ -76,8 +78,21 @@ Bundled packs: `ros` (read/audit) and `ros-safe-apply` (writes via safe sessions
 ```
 ros --read-only audit --profile full|network|security
 ros session begin|commit|rollback|status|watch
-ros file get <name> --output ./local [--via auto|api|ftp]
-ros backup binary --file name --output ./dir
+ros file get <name> [--output ./local] [--via sftp|auto|api|ftp] [--ephemeral-ssh]
+ros backup export [--file ./local.rsc] [--via sftp|auto|api|ftp] [--ephemeral-ssh]
+ros backup binary [--file name] [--output ./dir]
+    [--via sftp|auto|api|ftp] [--source-ip CIDR] [--ephemeral-ssh]
+
+# Text export: /export file=… on router + SFTP download (API stream is often empty)
+ros -d router-edge backup export --file ~/edge.rsc
+ros -d router-edge backup export --file ~/edge.rsc --ephemeral-ssh=false   # LAN, SSH already allowlisted
+
+# Binary backup download (default --via sftp):
+# 1) /system/backup/save  2) detect local+public IP  3) temporarily merge into
+#    /ip/service ssh address  4) SFTP get  5) always restore previous SSH state
+ros -d router-edge backup binary --file nightly --output ~/backups/
+ros -d router-edge backup binary --output ~/backups/ --ephemeral-ssh=false
+ros -d router-edge file get nightly.backup --via api   # text files with API contents only
 ros nat set-out-interface --id '*1' --interface ether1
 ros lease cleanup-waiting [--dry-run]
 ```

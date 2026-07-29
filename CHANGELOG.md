@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] — 2026-07-29
+
+### Added
+- SFTP download with **ephemeral SSH allowlist** for `backup binary --output` and `file get`
+- Public/local IP detection (`--source-ip`, `--public-ip-url`) and `--ephemeral-ssh` (default true for SFTP)
+- Winbox import `--api-port` (default 8728) and `--keep-winbox-port`
+- `backup export` via `/export file=` + SFTP when the API stream is empty (common on RouterOS 7)
+
+### Changed
+- Default download transport is SFTP (API for small text `contents`; FTP opt-in only)
+- Previous SSH `disabled` + `address` are always restored after transfer (success or failure)
+- README rewritten (pitch, BETA warning, TOC, focused examples)
+
 ## [0.3.1] — 2026-07-29
 
 ### Fixed

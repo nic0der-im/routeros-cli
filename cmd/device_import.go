@@ -15,11 +15,13 @@ import (
 
 func newDeviceImportCmd() *cobra.Command {
 	var (
-		from          string
-		file          string
-		withPasswords bool
-		dryRun        bool
-		force         bool
+		from           string
+		file           string
+		withPasswords  bool
+		dryRun         bool
+		force          bool
+		apiPort        string
+		keepWinboxPort bool
 	)
 
 	cmd := &cobra.Command{
@@ -34,16 +36,18 @@ Sources:
 When --file is omitted for winbox, ros auto-detects the default address book
 for the current OS (CDB first, then WBX).
 
-Imported addresses default to host:8728 (RouterOS API). Winbox itself uses a
-different port — adjust with ros device add/update if needed.
+By default every imported address uses --api-port (8728). Winbox stores the
+GUI/Winbox port (8291/…), which is not the RouterOS API — so those ports are
+replaced unless you pass --keep-winbox-port.
 
-Passwords are never printed. Without --with-passwords only address+username
-are imported; set secrets later via: ros device auth set <name>`,
+Passwords are never printed. With --with-passwords, Winbox cleartext secrets
+are moved into the OS keyring. Without it, set secrets later via:
+  ros device auth set <name>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			from = strings.ToLower(strings.TrimSpace(from))
 			switch from {
 			case "winbox":
-				return runWinboxImport(cmd, file, withPasswords, dryRun, force)
+				return runWinboxImport(cmd, file, withPasswords, dryRun, force, apiPort, keepWinboxPort)
 			case "rsc":
 				if file == "" {
 					return fmt.Errorf("--file is required for --from rsc")
@@ -60,6 +64,8 @@ are imported; set secrets later via: ros device auth set <name>`,
 	cmd.Flags().BoolVar(&withPasswords, "with-passwords", false, "import passwords into the OS keyring (winbox only)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print entries without writing inventory")
 	cmd.Flags().BoolVar(&force, "force", false, "update address/username when device name already exists")
+	cmd.Flags().StringVar(&apiPort, "api-port", winbox.DefaultAPIPort, "RouterOS API port applied to every imported host")
+	cmd.Flags().BoolVar(&keepWinboxPort, "keep-winbox-port", false, "keep the port stored in Winbox (GUI port; usually wrong for API)")
 
 	return cmd
 }
@@ -88,7 +94,7 @@ func (il importList) TableRows() [][]string {
 	return rows
 }
 
-func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, force bool) error {
+func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, force bool, apiPort string, keepWinboxPort bool) error {
 	a, err := loadApp()
 	if err != nil {
 		return err
@@ -111,12 +117,21 @@ func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, for
 		return fmt.Errorf("no entries found in %s", path)
 	}
 
+	if apiPort == "" {
+		apiPort = winbox.DefaultAPIPort
+	}
+	forceAPIPort := !keepWinboxPort
+
 	if withPasswords {
 		fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: Winbox stores secrets in cleartext; imported passwords will be moved into the OS keyring.")
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Note: passwords not imported; set them with: ros device auth set <name>")
 	}
-	fmt.Fprintln(cmd.ErrOrStderr(), "Note: addresses default to port 8728 (RouterOS API). Winbox uses a different port — fix if needed.")
+	if forceAPIPort {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Note: applying API port %s to every host (Winbox GUI ports ignored; use --keep-winbox-port to keep them)\n", apiPort)
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Note: keeping Winbox ports as stored (may not be RouterOS API)")
+	}
 
 	taken := func(name string) bool {
 		_, err := a.Inventory.Get(name)
@@ -132,7 +147,7 @@ func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, for
 	added, updated, skipped := 0, 0, 0
 
 	for _, e := range entries {
-		addr := winbox.NormalizeAddress(e.Address)
+		addr := winbox.NormalizeAddressForAPI(e.Address, apiPort, forceAPIPort)
 		if addr == "" {
 			skipped++
 			continue
@@ -217,8 +232,8 @@ func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, for
 	if err := output.Render(cmd.OutOrStdout(), a.OutFormat, rows, meta); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Import from %s: added=%d updated=%d skipped=%d (dry-run=%v with-passwords=%v)\n",
-		filepath.Base(path), added, updated, skipped, dryRun, withPasswords)
+	fmt.Fprintf(cmd.OutOrStdout(), "Import from %s: added=%d updated=%d skipped=%d (dry-run=%v with-passwords=%v api-port=%s)\n",
+		filepath.Base(path), added, updated, skipped, dryRun, withPasswords, apiPort)
 	return nil
 }
 

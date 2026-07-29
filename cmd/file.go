@@ -9,6 +9,7 @@ import (
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/filexfer"
+	"github.com/nic0der-im/routeros-cli/internal/publicip"
 	"github.com/spf13/cobra"
 )
 
@@ -24,11 +25,18 @@ func newFileCmd() *cobra.Command {
 func newFileGetCmd() *cobra.Command {
 	var outputPath string
 	var via string
+	var sourceIP string
+	var publicIPURL string
+	var ephemeralSSH bool
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
 		Short: "Download a file from the router to the local disk",
-		Args:  cobra.ExactArgs(1),
+		Long: `Download a RouterOS file.
+
+Default --via sftp uses ephemeral SSH allowlisting: detect local/public IP,
+merge into /ip/service ssh address, SFTP the file, restore previous SSH state.`,
+		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			name := args[0]
 			runWithClient(cmd, "/file/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
@@ -36,20 +44,28 @@ func newFileGetCmd() *cobra.Command {
 				if out == "" {
 					out = filepath.Base(name)
 				}
-				_, dev, err := a.Inventory.Resolve(deviceName)
+				_, dev, err := a.Inventory.Resolve(flagDevice)
 				if err != nil {
-					// deviceName from connect is already resolved name
-					_, dev, err = a.Inventory.Resolve(flagDevice)
-					if err != nil {
-						return err
-					}
+					return err
 				}
-				host := hostOnly(dev.Address)
 				pass, err := a.Creds.Get(deviceName)
 				if err != nil {
 					return err
 				}
-				n, err := filexfer.Download(ctx, c, name, out, filexfer.Via(via), host, dev.Username, pass)
+				ephem := ephemeralSSH
+				n, err := filexfer.Download(ctx, name, out, filexfer.Options{
+					Via:          filexfer.Via(via),
+					Host:         hostOnly(dev.Address),
+					User:         dev.Username,
+					Pass:         pass,
+					SourceIP:     sourceIP,
+					PublicIPURL:  publicIPURL,
+					EphemeralSSH: &ephem,
+					Client:       c,
+					OnStatus: func(msg string) {
+						fmt.Fprintf(cmd.OutOrStdout(), "  · %s\n", msg)
+					},
+				})
 				if err != nil {
 					return err
 				}
@@ -59,7 +75,10 @@ func newFileGetCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&outputPath, "output", "", "local output path (default: basename)")
-	cmd.Flags().StringVar(&via, "via", "auto", "transfer via: auto|api|ftp")
+	cmd.Flags().StringVar(&via, "via", "sftp", "transfer via: sftp|auto|api|ftp")
+	cmd.Flags().StringVar(&sourceIP, "source-ip", "", "override detected IP for ephemeral SSH allowlist")
+	cmd.Flags().StringVar(&publicIPURL, "public-ip-url", publicip.DefaultURL, "HTTPS URL that returns the caller public IP")
+	cmd.Flags().BoolVar(&ephemeralSSH, "ephemeral-ssh", true, "temporarily whitelist caller IPs on SSH for SFTP, then restore")
 	return cmd
 }
 
@@ -67,8 +86,7 @@ func hostOnly(address string) string {
 	host := address
 	if h, _, err := net.SplitHostPort(address); err == nil {
 		host = h
-	} else if i := strings.LastIndex(address, ":"); i > 0 {
-		// bare host:port without brackets
+	} else if i := strings.LastIndex(address, ":"); i > 0 && strings.Count(address, ":") == 1 {
 		host = address[:i]
 	}
 	return host

@@ -89,15 +89,32 @@ func UniqueName(base string, taken func(string) bool) string {
 // NormalizeAddress ensures host:port form, defaulting to DefaultAPIPort when
 // the Winbox entry has no port. Bare IPv6 without brackets is bracketed.
 // MAC addresses are left unchanged (Winbox L2; not a TCP API endpoint).
+//
+// Prefer NormalizeAddressForAPI for inventory imports: Winbox ports are the
+// GUI (8291/…), not the RouterOS API.
 func NormalizeAddress(addr string) string {
+	return normalizeAddress(addr, "", false)
+}
+
+// NormalizeAddressForAPI returns host:apiPort for inventory use.
+// When forceAPIPort is true (import default), any Winbox GUI port is replaced
+// with apiPort (or DefaultAPIPort when apiPort is empty).
+func NormalizeAddressForAPI(addr, apiPort string, forceAPIPort bool) string {
+	return normalizeAddress(addr, apiPort, forceAPIPort)
+}
+
+func normalizeAddress(addr, apiPort string, forceAPIPort bool) string {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return ""
 	}
+	if apiPort == "" {
+		apiPort = DefaultAPIPort
+	}
 	// Already host:port (including [ipv6]:port).
 	if host, port, err := net.SplitHostPort(addr); err == nil {
-		if port == "" {
-			port = DefaultAPIPort
+		if forceAPIPort || port == "" {
+			port = apiPort
 		}
 		return net.JoinHostPort(host, port)
 	}
@@ -111,10 +128,13 @@ func NormalizeAddress(addr string) string {
 	if i := strings.LastIndex(addr, ":"); i > 0 && strings.Count(addr, ":") == 1 {
 		maybePort := addr[i+1:]
 		if _, err := strconv.Atoi(maybePort); err == nil {
+			if forceAPIPort {
+				return net.JoinHostPort(addr[:i], apiPort)
+			}
 			return addr
 		}
 	}
-	return net.JoinHostPort(addr, DefaultAPIPort)
+	return net.JoinHostPort(addr, apiPort)
 }
 
 func hostOnly(addr string) string {

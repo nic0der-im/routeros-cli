@@ -1,124 +1,105 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="routeros-cli" width="520"/>
+<img src="assets/logo.png" alt="ros — RouterOS CLI" width="520"/>
 
 <br/>
 
-**A fast, structured CLI for MikroTik RouterOS — for network engineers and AI agents**
+**`ros` — a structured CLI for MikroTik RouterOS, built for engineers and AI agents**
 
 [![CI](https://github.com/nic0der-im/routeros-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/nic0der-im/routeros-cli/actions/workflows/ci.yml)
-[![Release](https://github.com/nic0der-im/routeros-cli/actions/workflows/release.yml/badge.svg)](https://github.com/nic0der-im/routeros-cli/releases)
+[![Release](https://github.com/nic0der-im/routeros-cli/actions/workflows/release.yml/badge.svg)](https://github.com/nic0der-im/routeros-cli/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/nic0der-im/routeros-cli)](https://goreportcard.com/report/github.com/nic0der-im/routeros-cli)
 
-[Docs](docs/COMMANDS.md) · [Agents](docs/AGENTS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Issues](https://github.com/nic0der-im/routeros-cli/issues)
+[Commands](docs/COMMANDS.md) · [Agents](docs/AGENTS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Issues](https://github.com/nic0der-im/routeros-cli/issues)
 
 </div>
 
 ---
 
-## What it is
+Tired of installing MCP servers that waste context and barely work?
+Tired of Winbox because it cannot be automated — while you want your agents to manage *your* MikroTik routers (or your customers')?
 
-`ros` (routeros-cli macro) talks to MikroTik RouterOS devices over the native API (8728 / 8729 by default).
+**This is the solution.**
 
-It is **not** SSH scraping — it speaks the binary RouterOS API, returns tables or JSON, and is safe for humans and agents.
+`ros` speaks the native RouterOS API (not SSH scraping). It returns clean tables or JSON, keeps passwords in the OS keyring, and ships agent skills so LLMs can audit and change routers safely.
 
-| For technicians | For AI agents |
-|-----------------|---------------|
-| Multi-router inventory by name | `--read-only` + JSON envelope |
-| Interactive or scripted device add | Bundled **skills** (`ros skills install`) |
-| Safe sessions with rollback | `audit` instead of pasting full `/export` |
+> **BETA warning.** Do **not** use this in production without the right guardrails.
+> The rules are clear: prefer `--read-only` / `ROS_READ_ONLY=1`, use **safe sessions** for writes, and start with a RouterOS user that has **read-only** permissions until you trust your agent to mutate state.
 
-```sh
-ros -d router-edge --read-only audit -o json
-```
+### Requirements
+
+| Need | Notes |
+|------|--------|
+| OS | macOS, Windows, or Linux |
+| Device | RouterOS-compatible MikroTik (7.x recommended) |
+| Reachability | LAN, public IP, or VPN/WireGuard to the router |
+| API | Enable `/ip/service` **api** (8728) or **api-ssl** (8729) and grant credentials |
+
+Enable the API on the router (example, LAN-only):
 
 ```text
-{
-  "ok": true,
-  "data": {
-    "firewall_filter": [ { ".id": "*1", "chain": "forward", "action": "fasttrack-connection", ... } ],
-    ...
-  },
-  "meta": { "device": "router-edge", "command": "audit", "timestamp": "..." }
-}
+/ip/service/set api disabled=no address=192.168.88.0/24
 ```
+
+---
+
+## Contents
+
+1. [Install](#install)
+2. [Build from source](#build-from-source)
+3. [Add a device](#add-a-device)
+4. [Import from Winbox](#import-from-winbox)
+5. [How commands work](#how-commands-work)
+6. [Examples](#examples)
+7. [Safe writes & sessions](#safe-writes--sessions)
+8. [Backups](#backups)
+9. [AI agents](#ai-agents)
+10. [Config & secrets](#config--secrets)
+11. [Docs & license](#docs--license)
 
 ---
 
 ## Install
 
-Supported targets: **macOS** (daily driver), **Windows**, **Arch Linux**, **Ubuntu** (incl. ubuntu-server).
+Pick one path for your OS. The binary is always named **`ros`** (alias `routeros-cli` on some packages).
 
-### macOS
+| Platform | Method |
+|----------|--------|
+| **macOS** | Homebrew |
+| **Windows** | Scoop (or release zip) |
+| **Arch** | AUR `routeros-cli-bin` |
+| **Ubuntu / other Linux** | `install.sh` or release tarball |
 
 ```sh
-brew tap nic0der-im/tap
-brew install ros
-```
+# macOS
+brew tap nic0der-im/tap && brew install ros
 
-### Windows
-
-```powershell
+# Windows (PowerShell)
 scoop bucket add nic0der-im https://github.com/nic0der-im/scoop-bucket
 scoop install nic0der-im/ros
-```
 
-Or download `ros_*_windows_*.zip` from the [latest release](https://github.com/nic0der-im/routeros-cli/releases/latest) and put `ros.exe` on `PATH`.
-
-### Arch Linux
-
-```sh
+# Arch
 yay -S routeros-cli-bin
-# or: paru -S routeros-cli-bin
-```
 
-### Ubuntu (desktop or server)
-
-Prefer the release installer (no Homebrew needed on production boxes):
-
-```sh
+# Ubuntu / generic Linux
 curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
-# custom prefix:
-# curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
+# optional: INSTALL_DIR="$HOME/.local/bin" curl ... | sh
 ```
 
-Homebrew on Linux also works if you already use it:
+Prebuilt archives for every OS/arch live on the [Releases](https://github.com/nic0der-im/routeros-cli/releases/latest) page (`ros_*_checksums.txt` included).
+
+Verify:
 
 ```sh
-brew tap nic0der-im/tap && brew install ros
-```
-
-| OS | Arch | Release asset |
-|----|------|---------------|
-| macOS | Apple Silicon | `ros_*_darwin_arm64.tar.gz` |
-| macOS | Intel | `ros_*_darwin_amd64.tar.gz` |
-| Linux | x86_64 | `ros_*_linux_amd64.tar.gz` |
-| Linux | aarch64 | `ros_*_linux_arm64.tar.gz` |
-| Windows | x86_64 | `ros_*_windows_amd64.zip` |
-| Windows | ARM64 | `ros_*_windows_arm64.zip` |
-
-Checksums ship as `ros_*_checksums.txt` in the same release.
-
-Requires RouterOS **7.x** with API enabled:
-
-```
-/ip/service/set api disabled=no address=192.168.88.0/24
-```
-
-For API-SSL (8729):
-
-```
-/ip/service/set api-ssl disabled=no
+ros version
 ```
 
 ---
 
 ## Build from source
 
-Needs **Go 1.26+** (see `go.mod`). The module root builds a single binary named `ros`.
-
-### All platforms (happy path)
+Needs **Go 1.26+** (see `go.mod`).
 
 ```sh
 git clone https://github.com/nic0der-im/routeros-cli.git
@@ -128,133 +109,23 @@ go build -o ros .
 ./ros version
 ```
 
-Optional version stamping (same as release builds):
-
-```sh
-go build -ldflags "-s -w -X main.version=0.2.0 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o ros .
-```
-
-Or without cloning:
-
-```sh
-go install github.com/nic0der-im/routeros-cli@latest
-# installs as $(go env GOPATH)/bin/routeros-cli (module path name)
-# symlink if you want the short name:
-# ln -sf "$(go env GOPATH)/bin/routeros-cli" "$(go env GOPATH)/bin/ros"
-```
-
-`install.sh` respects `INSTALL_DIR` (default `/usr/local/bin`):
-
-```sh
-curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
-```
-
-### macOS
-
-```sh
-# Apple Silicon or Intel — Go from Homebrew is fine
-brew install go
-git clone https://github.com/nic0der-im/routeros-cli.git
-cd routeros-cli
-go build -o ros .
-sudo install -m 755 ros /usr/local/bin/ros
-# or: mkdir -p ~/bin && mv ros ~/bin && echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
-```
-
-Cross-compile from macOS if needed:
-
-```sh
-GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -o ros-linux-amd64 .
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ros.exe .
-```
-
-### Linux
-
-```sh
-# Debian/Ubuntu
-sudo apt update && sudo apt install -y golang-go git
-# Fedora
-# sudo dnf install golang git
-# Arch
-# sudo pacman -S go git
-
-git clone https://github.com/nic0der-im/routeros-cli.git
-cd routeros-cli
-go build -o ros .
-sudo install -m 755 ros /usr/local/bin/ros
-sudo ln -sf /usr/local/bin/ros /usr/local/bin/routeros-cli   # optional legacy alias
-```
-
-Static binary (useful for containers / minimal hosts):
-
-```sh
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ros .
-```
-
-### Windows (PowerShell)
-
-```powershell
-# Install Go from https://go.dev/dl/ then:
-git clone https://github.com/nic0der-im/routeros-cli.git
-cd routeros-cli
-go test ./...
-go build -o ros.exe .
-# Put ros.exe somewhere on PATH, e.g.:
-# Copy-Item .\ros.exe $env:USERPROFILE\bin\
-```
-
-Cross-compile from Windows to Linux:
-
-```powershell
-$env:CGO_ENABLED=0; $env:GOOS="linux"; $env:GOARCH="amd64"; go build -o ros-linux-amd64 .
-```
-
-### Verify
-
-```sh
-ros version
-ros device list
-```
-
-```text
-ros 0.2.0          # "dev" when built without ldflags
-  commit: abc1234
-  built:  2026-07-29T04:40:00Z
-```
-
-### Shell completions
-
-Cobra ships `ros completion` for bash, zsh, fish, and PowerShell:
-
-```sh
-# zsh (Homebrew formula also installs completions automatically)
-ros completion zsh > "${fpath[1]}/_ros"
-
-# bash
-ros completion bash > /usr/local/etc/bash_completion.d/ros
-
-# fish
-ros completion fish > ~/.config/fish/completions/ros.fish
-
-# powershell
-ros completion powershell | Out-String | Invoke-Expression
-```
+That is enough for local development on macOS, Linux, and Windows (`go build -o ros.exe .`).
 
 ---
 
-## Quick start — add a router
+## Add a device
 
-Passwords go to the **OS keyring**, never to `config.toml`.
+Passwords go to the **OS keyring** (`ros` service). They are never written to `config.toml`.
 
-### Interactive (recommended on your laptop)
+**Interactive** (best on a laptop):
 
 ```sh
 ros device add
 ```
 
-Prompts for: name, host, port, username, password, TLS, optional id/tags.
+You will be prompted for name, host, port, username, password, and TLS.
 
-### Agentic / scripted (pipes & secrets)
+**Scripted / agentic** (stdin password):
 
 ```sh
 echo "$PASS" | ros device add "central-hub-buenos-aires" \
@@ -264,7 +135,7 @@ echo "$PASS" | ros device add "central-hub-buenos-aires" \
   --password-stdin
 ```
 
-### Then
+Then select, test, and list:
 
 ```sh
 ros device use "central-hub-buenos-aires"
@@ -272,167 +143,87 @@ ros device test
 ros device list
 ```
 
-```text
-Connected to "central-hub-buenos-aires" (identity: central-hub-buenos-aires)
+`-d` accepts **name**, **id**, or **IP**. Port `8728` → plain API; `8729` → API-SSL (TLS inferred).
 
-DEFAULT  NAME                         ID               ADDRESS              USERNAME  TLS
-*        central-hub-buenos-aires     central-hub-ba   10.0.0.1:8728        admin     false
-         router-edge                  router-edge      192.168.88.1:8728    admin     false
-         edge-node-west               edge-west        10.10.20.1:8728      admin     false
-```
-
-| Tip | Detail |
-|-----|--------|
-| Port `8728` | Plain API (TLS inferred off) |
-| Port `8729` | API-SSL (TLS inferred on) |
-| Lookup | `-d` accepts **name**, **id**, or **IP** |
-| Winbox list | `ros device import --from winbox --dry-run` |
-
-Rotate password later:
-
-```sh
-ros device auth set "central-hub-buenos-aires"    # interactive prompt
-```
+Rotate a secret later: `ros device auth set <name>`.
 
 ---
 
-## How commands are grouped
+## Import from Winbox
 
-Everything follows:
+Yes — Winbox import works. `ros` can read your local Winbox address book and turn each entry into an inventory device.
 
-```text
-ros -d <DEVICE> <VERB> <DOMAIN|/path> [params...]
+| Source | File |
+|--------|------|
+| Winbox 4 | `Addresses.cdb` |
+| Winbox 3 | `addresses.WBX` |
+
+If you omit `--file`, `ros` auto-detects the default MikroTik/Winbox data directory on macOS, Linux, and Windows (and common Wine paths).
+
+```sh
+# Preview only — nothing is written
+ros device import --from winbox --dry-run
+
+# Import hosts + usernames; apply RouterOS API port 8728 to every host
+# (Winbox stores the GUI port — 8291/… — which is wrong for the API)
+ros device import --from winbox
+
+# Also move Winbox passwords into the OS keyring
+ros device import --from winbox --with-passwords
+
+# Custom API port for the whole batch (e.g. MSP fleets that listen on 7777)
+ros device import --from winbox --with-passwords --api-port 7777
+
+# Rare: keep the port literally stored in Winbox
+ros device import --from winbox --keep-winbox-port
 ```
 
-### Verbs
+Important details:
 
-| Verb | Use |
-|------|-----|
+- Default **`--api-port 8728`** replaces whatever port Winbox had. Override per fleet with `--api-port`, or pass `--keep-winbox-port` only when you know the stored port is already the API.
+- Without `--with-passwords`, only address + username are imported. Finish with `ros device auth set <name>`.
+- Winbox stores secrets in cleartext; `--with-passwords` moves them into the keyring and prints a warning.
+- Use `--file /path/to/Addresses.cdb` when the book is not in the default location, and `--force` to refresh an existing inventory name.
+
+---
+
+## How commands work
+
+Shape:
+
+```text
+ros -d <DEVICE> <verb> <domain|/raw/path> [params...]
+```
+
+| Verb | Meaning |
+|------|---------|
 | `get` | Read |
-| `create` | Add |
-| `set` | Update |
-| `delete` | Remove (needs `.id=*N`) |
+| `create` / `set` / `delete` | Mutate |
 | `enable` / `disable` | Toggle |
-| `audit` | Read-only multi-domain snapshot |
-| `session` | Safe apply journal |
-| `diag` | log / ping / neighbors |
+| `audit` | Multi-domain read-only snapshot |
 | `exec` | Raw API escape hatch |
 
-### Domains (curated aliases)
+Curated domain aliases (shortcuts to API paths):
 
 ```sh
 ros domains
 ```
 
-```text
-dhcp/lease                 → /ip/dhcp-server/lease
-firewall/filter            → /ip/firewall/filter
-firewall/nat               → /ip/firewall/nat
-interface/wireguard        → /interface/wireguard
-ip/address                 → /ip/address
-user                       → /user
-...
-```
+Examples of aliases: `firewall/filter` → `/ip/firewall/filter`, `radius` → `/radius`, `interface` → `/interface`.
 
-| Domain | API path |
-|--------|----------|
-| `firewall/filter` | `/ip/firewall/filter` |
-| `firewall/nat` | `/ip/firewall/nat` |
-| `dhcp/lease` | `/ip/dhcp-server/lease` |
-| `user` | `/user` |
-| `radius` | `/radius` |
-| `interface/bridge` | `/interface/bridge` |
+Params: `key=value` becomes RouterOS `=key=value`; target a row with `.id=*1`; filter with `?=disabled=false`.
 
-Raw paths always work: `ros get /ip/firewall/address-list`
-
-### Params
-
-```text
-key=value     →  =key=value
-.id=*1        →  target row
-?=disabled=false   →  query filter
-```
+Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 
 ---
 
-## Everyday examples
+## Examples
 
-### Read
+These are the everyday reads you will use most. Device name `router-edge` is a placeholder — use your inventory name.
 
-```sh
-ros -d router-edge get system info
-```
+### Audit (human)
 
-```text
-IDENTITY         BOARD    PLATFORM  VERSION          UPTIME         CPU LOAD  MEMORY FREE/TOTAL
-Edge Router Lab  CCR2004  MikroTik  7.18.2 (stable)  1w4d6h36m30s   6%        27738112/67108864
-```
-
-```sh
-ros -d router-edge get ip/address
-```
-
-```text
-.ID  NETWORK         INTERFACE    ADDRESS              DYNAMIC  DISABLED
-*2   192.168.88.0    dhcpSwitch   192.168.88.1/24      false    false
-*67  100.68.176.0    ether1       100.68.178.110/20    true     false
-```
-
-```sh
-ros -d router-edge get firewall/filter
-```
-
-```text
-DYNAMIC  COMMENT                         .ID  CHAIN    ACTION                  BYTES         PACKETS
-false    FastTrack Established/Related   *1   forward  fasttrack-connection    2273138543    12394696
-false    Accept Established/Related      *3   forward  accept                  2273138543    12394696
-false    Drop all other input            *A   input    drop                    38249427      269466
-...
-```
-
-```sh
-ros -d router-edge get dhcp/lease
-```
-
-```text
-ACTIVE-ADDRESS  HOST-NAME    COMMENT      ADDRESS         MAC-ADDRESS        STATUS  SERVER
-192.168.88.29   laptop-ops   Ops laptop   192.168.88.29   FC:B2:14:81:B3:AD  bound   dhcpNetwork
-192.168.88.39   lab-server   Lab server   192.168.88.39   E0:B9:A5:D5:18:19  bound   dhcpNetwork
-...
-```
-
-```sh
-ros -d router-edge get user
-```
-
-```text
-GROUP  DISABLED  .ID  NAME   LAST-LOGGED-IN
-full   false     *2   admin  2026-07-29 01:46:52
-```
-
-```sh
-ros -d router-edge get system info -o json
-```
-
-```json
-{
-  "ok": true,
-  "data": [
-    {
-      "Identity": "Edge Router Lab",
-      "Board": "CCR2004",
-      "Version": "7.18.2 (stable)",
-      "Uptime": "1w4d6h36m40s",
-      "CPU Load": "5%"
-    }
-  ],
-  "meta": {
-    "device": "router-edge",
-    "command": "/system/resource/print",
-    "count": 1
-  }
-}
-```
+`audit` pulls a structured snapshot so agents (and humans) do not need a full `/export`. Profiles: `full`, `network`, `security`.
 
 ```sh
 ros -d router-edge --read-only audit --profile network
@@ -448,139 +239,149 @@ Audit of "router-edge" (profile=network)
   dhcp_servers:        1 item(s)
 ```
 
-Profiles: `full` · `network` · `security`
+### Audit (JSON)
 
-### Write (always prefer a safe session)
+Same data as a stable envelope for agents: `{ "ok", "data", "meta" }`. Exit code `4` means a read-only violation.
+
+```sh
+ros -d router-edge --read-only audit --profile security -o json
+```
+
+```json
+{
+  "ok": true,
+  "data": {
+    "firewall_filter": [ { ".id": "*1", "chain": "forward", "action": "accept" } ],
+    "users": [ { "name": "admin", "group": "full" } ]
+  },
+  "meta": {
+    "device": "router-edge",
+    "command": "audit",
+    "timestamp": "2026-07-29T05:00:00Z"
+  }
+}
+```
+
+### Interfaces
+
+```sh
+ros -d router-edge get interface
+```
+
+```text
+.ID  NAME     TYPE       RUNNING  DISABLED  COMMENT
+*1   ether1   ether      true     false     WAN
+*2   bridge   bridge     true     false     LAN
+*E   wg-msp   wireguard  true     false     MSP tunnel
+```
+
+### Firewall filter rules
+
+```sh
+ros -d router-edge get firewall/filter
+```
+
+```text
+.ID  CHAIN    ACTION                  COMMENT
+*1   forward  fasttrack-connection    FastTrack Established/Related
+*3   forward  accept                  Accept Established/Related
+*A   input    drop                    Drop all other input
+```
+
+### RADIUS servers
+
+```sh
+ros -d router-edge get radius
+```
+
+```text
+.ID  SERVICE  ADDRESS        TIMEOUT  COMMENT
+*1   login    10.0.0.50      300ms    Central AAA
+*2   ppp      10.0.0.50      300ms    Central AAA
+```
+
+---
+
+## Safe writes & sessions
+
+For anything that changes the router, prefer a **safe session**. Changes are journaled so you can `rollback` if something goes wrong.
 
 ```sh
 ros -d router-edge session begin --safe
-```
-
-```text
-Session 1785300485258875000 started on "router-edge" (safe=true)
-```
-
-```sh
 ros -d router-edge create firewall/filter chain=forward action=accept protocol=tcp dst-port=443
-ros -d router-edge set dhcp/server .id=*1 lease-time=1d
-ros -d router-edge delete dhcp/lease .id=*F9
-
 ros -d router-edge session status
-```
-
-```text
-Session 1785300485258875000
-  Device:     router-edge
-  Status:     active
-  Safe:       true
-  Started:    2026-07-29T04:48:05Z
-  Updated:    2026-07-29T04:48:05Z
-  Changes:    3
-```
-
-```sh
 ros -d router-edge session commit
 # or: ros -d router-edge session rollback
 ```
 
-```text
-Session 1785300485258875000 committed on "router-edge" (3 change(s))
-```
-
-### Diagnostics
-
-```sh
-ros -d router-edge diag ping 1.1.1.1 --count 3
-```
-
-```text
-SENT  RECEIVED  PACKET-LOSS  AVG-RTT    SEQ  HOST     SIZE  MIN-RTT    MAX-RTT    TTL  TIME
-1     1         0            30ms808us  0    1.1.1.1  56    30ms808us  30ms808us  58   30ms808us
-2     2         0            30ms482us  1    1.1.1.1  56    30ms157us  30ms808us  58   30ms157us
-3     3         0            30ms411us  2    1.1.1.1  56    30ms157us  30ms808us  58   30ms268us
-```
-
-```sh
-ros -d router-edge diag log
-```
-
-```text
-.ID  TIME                 TOPICS                 MESSAGE
-*0   2026-07-17 02:04:45  system,error,critical  router was rebooted without proper shutdown
-*3   2026-07-17 02:05:03  dhcp,info              dhcp-client on ether1 got IP address 100.68.178.110
-...
-```
-
-```sh
-ros -d router-edge diag neighbors
-```
-
-### Backup
-
-```sh
-ros -d router-edge backup export --file ~/router-edge-$(date +%F).rsc
-```
-
-```text
-Configuration exported to "/Users/you/router-edge-2026-07-29.rsc" from "router-edge"
-```
-
-```sh
-# Creates .backup on the router only (local download is still on the roadmap)
-ros -d router-edge backup binary --file routeros-cli-backup
-```
-
-```text
-Backup "routeros-cli-backup.backup" created on "router-edge" (size: 123456)
-```
-
-Full reference: [docs/COMMANDS.md](docs/COMMANDS.md)
+`session watch` can heartbeat the link and auto-rollback when connectivity is lost (useful for remote applies).
 
 ---
 
-## AI agents & skills
+## Backups
 
-`ros` ships **LLM skills** that teach agents the safe workflow (read-only audit first; writes only via safe sessions).
+**Text export** — writes `/export file=…` on the router and downloads the `.rsc`
+(SFTP by default). The API stream is empty on many RouterOS 7 devices; this path works.
+
+```sh
+ros -d router-edge backup export --file ~/router-edge-$(date +%F).rsc
+
+# Already on LAN with SSH allowlisted:
+ros -d router-edge backup export --file ~/edge.rsc --ephemeral-ssh=false
+```
+
+**Binary backup + local download** (default transport is **SFTP**):
+
+1. Create `.backup` on the router  
+2. Detect your local/public IP  
+3. Temporarily merge those IPs into `/ip/service ssh` allowlist  
+4. Download over SFTP  
+5. **Always** restore the previous SSH `disabled` + `address`
+
+```sh
+ros -d router-edge backup binary --file nightly --output ~/backups/
+```
+
+Already on VPN to the client LAN? Skip the ephemeral open:
+
+```sh
+ros -d router-edge backup binary --output ~/backups/ --ephemeral-ssh=false
+```
+
+Override detection with `--source-ip`, or pull an existing file with `ros file get <name>`. Prefer SFTP over FTP; `--via api` only works for small text files that expose `contents`.
+
+---
+
+## AI agents
+
+`ros` ships two skill packs that teach agents the safe workflow (audit first; writes only inside sessions).
 
 ```sh
 ros skills list
-```
-
-```text
-ros
-ros-safe-apply
-```
-
-```sh
-# Install into Cursor, Codex, Claude Code, OpenCode
 ros skills install --agent all --scope user
 ```
 
-| Pack | Purpose |
-|------|---------|
+| Pack | Use |
+|------|-----|
 | `ros` | Inventory, audit, read-only `get` |
-| `ros-safe-apply` | Firewall / DHCP / users / etc. inside `session begin` |
+| `ros-safe-apply` | Mutations inside `session begin --safe` |
+
+Recommended agent environment:
 
 ```sh
 export ROS_READ_ONLY=1
 export ROS_DEFAULT_OUTPUT=json
-
-ros -d "central-hub-buenos-aires" audit --profile full -o json
 ```
 
-Details: [docs/AGENTS.md](docs/AGENTS.md)
+Details, exit codes, and JSON error kinds: [docs/AGENTS.md](docs/AGENTS.md).
 
-### Exit codes
-
-| Code | Meaning |
+| Exit | Meaning |
 |------|---------|
 | 0 | OK |
 | 1 | Command / API error |
 | 2 | Connection / auth |
 | 3 | Config |
 | 4 | Read-only violation |
-
-JSON shape: `{ "ok", "data" \| "error", "meta" }` — add `--raw` for `.id` fields.
 
 ---
 
@@ -589,69 +390,22 @@ JSON shape: `{ "ok", "data" \| "error", "meta" }` — add `--raw` for `.id` fiel
 | What | Where |
 |------|--------|
 | Inventory | `~/.config/ros/config.toml` |
-| Passwords | OS Keychain (`ros` service) |
+| Passwords | OS keyring (service name `ros`) |
 | Sessions | `~/.config/ros/sessions/` |
 
-Legacy `~/.config/routeros-cli/` is migrated automatically.
+Legacy `~/.config/routeros-cli/` is migrated automatically on first run.
 
 ---
 
-## Roadmap
+## Docs & license
 
-### Done (v0.2.0)
-
-- [x] Binary rename to `ros` (+ `routeros-cli` alias) and config migration to `~/.config/ros/`
-- [x] Multi-device inventory + OS keyring (never passwords in TOML)
-- [x] Verb + domain API surface + `ros domains` curated aliases
-- [x] `--read-only` / `ROS_READ_ONLY=1`, exit code 4, JSON envelope
-- [x] `ros audit` profiles (`full` / `network` / `security`)
-- [x] Safe sessions (`begin` / `commit` / `rollback` / `status`) with best-effort inverse journal
-- [x] Winbox import (v3 `.WBX` / v4 `Addresses.cdb` on macOS, Linux, Windows)
-- [x] Bundled agent skills + `ros skills install|uninstall|list|path`
-- [x] Diagnostics (`diag log|ping|neighbors`), text `backup export`
-- [x] Cross-platform release assets (linux/darwin/windows × amd64/arm64)
-
-### Done (v0.3.0)
-
-- [x] Pre-state journaling for `set` / `delete` (+ curated helpers)
-- [x] `session watch` heartbeat + auto-rollback on link loss (`auto_rollback_pending`)
-- [x] `backup binary --output` + `file get` (API contents or FTP)
-- [x] Homebrew tap (`nic0der-im/homebrew-tap`) + GoReleaser `brews`
-- [x] AUR PKGBUILD/`.SRCINFO` with real checksums (live AUR push is maintainer-side)
-- [x] Completions documented + Homebrew formula installs them
-- [x] Stable `apperr` kinds in JSON `error.code`
-- [x] Expanded domains + `nat` / `lease` helpers + richer `diag`
-- [x] Opt-in integration tests (`ROS_INTEGRATION_DEVICE`)
-- [x] Scoop bucket for Windows (`nic0der-im/scoop-bucket`)
-- [x] AUR package live (`routeros-cli-bin` 0.3.0)
-
-### Ongoing
-
-- [ ] Expand capa linda further as field needs appear
-- [ ] Harden skill packs after more production apply workflows
-
-### Backlog (low priority)
-
-- Chocolatey.org (Windows already covered by Scoop)
-- Emulating Winbox GUI parity end-to-end
-- Storing passwords in config files or CLI flags
-- Targeting RouterOS 6.x as a first-class platform
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome.
-
-```sh
-go test ./...
-go build -o ros .
-```
-
-## License
+| Doc | Purpose |
+|-----|---------|
+| [docs/COMMANDS.md](docs/COMMANDS.md) | Full command reference |
+| [docs/AGENTS.md](docs/AGENTS.md) | Agent / skill workflow |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failures |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 MIT — see [LICENSE](LICENSE).
 
-## Contact
-
-[nic0der-im](https://github.com/nic0der-im) · [github.com/nic0der-im/routeros-cli](https://github.com/nic0der-im/routeros-cli)
+Maintainer: [nic0der-im](https://github.com/nic0der-im) · [github.com/nic0der-im/routeros-cli](https://github.com/nic0der-im/routeros-cli)

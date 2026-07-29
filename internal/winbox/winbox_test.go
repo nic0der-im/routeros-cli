@@ -43,6 +43,21 @@ func TestNormalizeAddress(t *testing.T) {
 	}
 }
 
+func TestNormalizeAddressForAPI(t *testing.T) {
+	got := NormalizeAddressForAPI("192.168.88.1:8291", "8728", true)
+	if got != "192.168.88.1:8728" {
+		t.Fatalf("force API port: got %q", got)
+	}
+	got = NormalizeAddressForAPI("192.168.88.1:8291", "8728", false)
+	if got != "192.168.88.1:8291" {
+		t.Fatalf("keep winbox port: got %q", got)
+	}
+	got = NormalizeAddressForAPI("10.0.0.1", "8729", true)
+	if got != "10.0.0.1:8729" {
+		t.Fatalf("custom api port: got %q", got)
+	}
+}
+
 func TestUniqueName(t *testing.T) {
 	taken := map[string]bool{"lab": true, "lab-2": true}
 	got := UniqueName("lab", func(s string) bool { return taken[s] })
