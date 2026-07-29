@@ -54,37 +54,31 @@ and downloads the .rsc (default via SFTP), then removes the remote file.
 If --file is omitted, the export is printed to stdout.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/export", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/export"); err != nil {
+				if err := a.ensureWritable(deviceName, "/export"); err != nil {
 					return err
 				}
 
-				// Fast path: some devices still stream export text over the API.
-				if result, err := c.Run(ctx, "/export"); err == nil {
-					if export := extractExportText(result); export != "" {
-						return writeOrPrintExport(cmd, filePath, export, deviceName)
+				// Fast path to stdout when --file is omitted and API streams text.
+				if filePath == "" {
+					if result, err := c.Run(ctx, "/export"); err == nil {
+						if export := extractExportText(result); export != "" {
+							fmt.Fprint(cmd.OutOrStdout(), export)
+							return nil
+						}
 					}
 				}
 
-				remoteBase := fmt.Sprintf("%s-%d", defaultExportName, time.Now().Unix())
-				remoteName := remoteBase + ".rsc"
-				_, err := c.Run(ctx, "/export", "=file="+remoteBase)
-				if err != nil {
-					return fmt.Errorf("exporting configuration on %q: %w", deviceName, err)
-				}
-
-				out := filePath
+				outDest := filePath
 				tmpLocal := false
-				if out == "" {
+				if outDest == "" {
 					tmp, err := os.CreateTemp("", "ros-export-*.rsc")
 					if err != nil {
 						return err
 					}
-					out = tmp.Name()
+					outDest = tmp.Name()
 					_ = tmp.Close()
 					tmpLocal = true
-					defer func() { _ = os.Remove(out) }()
-				} else if st, err := os.Stat(out); err == nil && st.IsDir() {
-					out = filepath.Join(out, remoteName)
+					defer func() { _ = os.Remove(outDest) }()
 				}
 
 				_, dev, err := a.Inventory.Resolve(flagDevice)
@@ -95,30 +89,21 @@ If --file is omitted, the export is printed to stdout.`,
 				if err != nil {
 					return err
 				}
-				ephem := ephemeralSSH
-				n, err := filexfer.Download(ctx, remoteName, out, filexfer.Options{
-					Via:          filexfer.Via(via),
+
+				out, n, err := exportTextToLocal(ctx, c, deviceName, exportTextOptions{
+					DestPath:     outDest,
+					Via:          via,
+					SourceIP:     sourceIP,
+					PublicIPURL:  publicIPURL,
+					EphemeralSSH: ephemeralSSH,
+					KeepRemote:   keepRemote,
 					Host:         hostOnly(dev.Address),
 					User:         dev.Username,
 					Pass:         pass,
-					SourceIP:     sourceIP,
-					PublicIPURL:  publicIPURL,
-					EphemeralSSH: &ephem,
-					Client:       c,
-					OnStatus: func(msg string) {
-						fmt.Fprintf(cmd.OutOrStdout(), "  · %s\n", msg)
-					},
+					Status:       statusWriter(cmd.OutOrStdout()),
 				})
-				if !keepRemote {
-					if _, rerr := c.Run(context.WithoutCancel(ctx), "/file/remove", "=numbers="+remoteName); rerr != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not remove remote %q: %v\n", remoteName, rerr)
-					}
-				}
 				if err != nil {
-					return fmt.Errorf("downloading export: %w", err)
-				}
-				if n == 0 {
-					return fmt.Errorf("downloaded empty export from %q", deviceName)
+					return err
 				}
 
 				if tmpLocal {
@@ -143,18 +128,6 @@ If --file is omitted, the export is printed to stdout.`,
 	cmd.Flags().BoolVar(&keepRemote, "keep-remote", false, "keep the .rsc on the router after download")
 
 	return cmd
-}
-
-func writeOrPrintExport(cmd *cobra.Command, filePath, export, deviceName string) error {
-	if filePath != "" {
-		if err := os.WriteFile(filePath, []byte(export), 0o600); err != nil {
-			return fmt.Errorf("writing export to %q: %w", filePath, err)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Configuration exported to %q from %q\n", filePath, deviceName)
-		return nil
-	}
-	fmt.Fprint(cmd.OutOrStdout(), export)
-	return nil
 }
 
 func newBackupBinaryCmd() *cobra.Command {
@@ -183,7 +156,7 @@ Use --via api for small text files with API contents, or --via ftp only when
 explicitly required (not recommended).`,
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/system/backup/save", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/system/backup/save"); err != nil {
+				if err := a.ensureWritable(deviceName, "/system/backup/save"); err != nil {
 					return err
 				}
 				name := backupName

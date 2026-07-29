@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/guardrails"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/policy"
 	"github.com/nic0der-im/routeros-cli/internal/rosapi"
@@ -26,6 +27,10 @@ Examples:
   ros exec /ip/address/print =interface=ether1
   ros exec /system/package/print
 
+Commands are filtered by a builtin denylist plus optional per-device
+exec_allow / exec_deny globs (defense-in-depth; not a hard security boundary
+if the RouterOS user is full-admin).
+
 During a safe session, write commands without a known inverse require --force.`,
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -33,8 +38,13 @@ During a safe session, write commands without a known inverse require --force.`,
 			rosArgs := args[1:]
 
 			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				dev := a.deviceConfig(deviceName)
+				if err := guardrails.CheckExec(rosCmd, dev.ExecAllow, dev.ExecDeny); err != nil {
+					return err
+				}
+
 				if policy.IsWrite(rosCmd) {
-					if err := a.ensureWritable(rosCmd); err != nil {
+					if err := a.ensureWritableForce(deviceName, rosCmd, force); err != nil {
 						return err
 					}
 					if err := a.ensureExecJournalable(deviceName, rosCmd, rosArgs, force); err != nil {

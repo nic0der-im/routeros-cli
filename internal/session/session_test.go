@@ -6,6 +6,31 @@ import (
 	"testing"
 )
 
+func TestBeginWithMeta(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.BeginWith("r1", BeginOpts{
+		Safe:      true,
+		Note:      "force-no-backup",
+		BackupDir: "/tmp/backups/r1/ts",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Note != "force-no-backup" {
+		t.Errorf("note=%q", reloaded.Note)
+	}
+	if reloaded.BackupDir != "/tmp/backups/r1/ts" {
+		t.Errorf("backup_dir=%q", reloaded.BackupDir)
+	}
+}
+
 func TestBeginCommit(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -124,11 +149,11 @@ func TestSanitize(t *testing.T) {
 
 func TestBuildSetAndRemoveInverse(t *testing.T) {
 	pre := map[string]string{
-		".id":         "*1",
-		"lease-time":  "30m",
-		"name":        "dhcpNetwork",
-		"bytes":       "999",
-		"disabled":    "false",
+		".id":        "*1",
+		"lease-time": "30m",
+		"name":       "dhcpNetwork",
+		"bytes":      "999",
+		"disabled":   "false",
 	}
 	inv := BuildSetInverse("/ip/dhcp-server/set", "*1", pre, []string{"=.id=*1", "=lease-time=1d"})
 	if len(inv) < 3 || inv[0] != "/ip/dhcp-server/set" || inv[1] != "=.id=*1" {
@@ -157,10 +182,10 @@ func TestBuildSetAndRemoveInverse(t *testing.T) {
 
 func TestBuildSetInverseSingleton(t *testing.T) {
 	pre := map[string]string{
-		"ddns-enabled": "yes",
-		"update-time":  "true",
+		"ddns-enabled":   "yes",
+		"update-time":    "true",
 		"public-address": "1.2.3.4",
-		"status":       "updated",
+		"status":         "updated",
 	}
 	inv := BuildSetInverse("/ip/cloud/set", "", pre, []string{
 		"=ddns-enabled=auto",
@@ -230,4 +255,3 @@ func TestMarkAutoRollbackPending(t *testing.T) {
 		t.Fatal("expected auto_rollback_pending")
 	}
 }
-

@@ -231,7 +231,7 @@ Interface **RX/TX** are cumulative byte counters from the API (`rx-byte` / `tx-b
 
 PPPoE/PPP/L2TP dynamic interfaces (and their addresses) are **hidden by default** so ISP boxes stay readable. Use `--show-ppp` to list them; PPP active sessions appear as a count unless `--show-ppp` is set. Skip the CPU sample with `--skip-cpu-profile` for a faster run.
 
-Use `--profile hygiene` for a compact optimization pass: Cloud DDNS flags, on-router `*.backup` clutter, running-iface drop counters, FastTrack/fast-path flags, enabled services plus disabled management leftovers, and DHCP waiting/duplicate-MAC hints (always skips `/tool/profile`).
+Use `--profile hygiene` for a compact optimization pass: Cloud DDNS flags, on-router `*.backup` clutter, running-iface drop counters, FastTrack/fast-path flags, enabled services plus disabled management leftovers, DHCP waiting/duplicate-MAC hints, plus soft-fetched WireGuard peers / netwatch / DNS static for FINDINGS (always skips `/tool/profile`).
 
 ```sh
 ros -d router-edge --read-only audit --profile full

@@ -80,6 +80,33 @@ var Alias = map[string]string{
 	"tool/torch":  "/tool/torch",
 	"ip/neighbor": "/ip/neighbor",
 	"file":        "/file",
+
+	// B1 — agent-friendly aliases (ROS7 paths; curated verbs in B2/B3)
+	"dns/static":                            "/ip/dns/static",
+	"arp":                                   "/ip/arp",
+	"ip/arp":                                "/ip/arp",
+	"netwatch":                              "/tool/netwatch",
+	"tool/netwatch":                         "/tool/netwatch",
+	"routing/table":                         "/routing/table",
+	"bgp/session":                           "/routing/bgp/session",
+	"routing/bgp/session":                   "/routing/bgp/session",
+	"ospf":                                  "/routing/ospf/instance",
+	"routing/ospf":                          "/routing/ospf/instance",
+	"ospf/neighbor":                         "/routing/ospf/neighbor",
+	"routing/ospf/neighbor":                 "/routing/ospf/neighbor",
+	"ospf/interface":                        "/routing/ospf/interface-template",
+	"ospf/interface-template":               "/routing/ospf/interface-template",
+	"wifi/registration":                     "/interface/wifi/registration",
+	"interface/wifi/registration":           "/interface/wifi/registration",
+	"interface/wireless/registration-table": "/interface/wireless/registration-table",
+	"address-list":                          "/ip/firewall/address-list",
+	"wg":                                    "/interface/wireguard",
+	"wg/peers":                              "/interface/wireguard/peers",
+	"ipv6/address":                          "/ipv6/address",
+	"ipv6/route":                            "/ipv6/route",
+	"ipv6/firewall/filter":                  "/ipv6/firewall/filter",
+	"queue/type":                            "/queue/type",
+	"system/logging/action":                 "/system/logging/action",
 }
 
 // StripTrailingReadAction removes one trailing /print or /get (case-insensitive)

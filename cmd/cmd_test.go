@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/nic0der-im/routeros-cli/internal/config"
 	"github.com/nic0der-im/routeros-cli/internal/credential"
 	"github.com/nic0der-im/routeros-cli/internal/device"
+	"github.com/nic0der-im/routeros-cli/internal/guardrails"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/policy"
 	"github.com/nic0der-im/routeros-cli/internal/session"
@@ -55,6 +58,13 @@ func testApp(t *testing.T) (*App, *client.MockClient) {
 	_ = creds.Set("lab", "secret")
 	_ = creds.Set("central hub BA", "secret")
 
+	// Isolate doctor state and seed a fresh timestamp so prod write tests
+	// focus on their own gates unless they intentionally stale/clear it.
+	guardrails.SetDoctorStateDirForTest(filepath.Join(dir, "doctor-state"))
+	t.Cleanup(func() { guardrails.SetDoctorStateDirForTest("") })
+	_ = guardrails.RecordDoctorAt("lab", time.Now())
+	_ = guardrails.RecordDoctorAt("central hub BA", time.Now())
+
 	mock := client.NewMockClient()
 	app := &App{
 		Config:    cfg,
@@ -64,6 +74,8 @@ func testApp(t *testing.T) (*App, *client.MockClient) {
 		Sessions:  store,
 		OutFormat: output.FormatJSON,
 		Timeout:   5 * time.Second,
+		Profile:   config.ProfileOperator,
+		AuditDir:  filepath.Join(dir, "audit"),
 	}
 	return app, mock
 }
@@ -71,7 +83,7 @@ func testApp(t *testing.T) (*App, *client.MockClient) {
 func TestEnsureWritable_ReadOnly(t *testing.T) {
 	a, _ := testApp(t)
 	a.ReadOnly = true
-	err := a.ensureWritable("/ip/address/add")
+	err := a.ensureWritable("lab", "/ip/address/add")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -79,6 +91,214 @@ func TestEnsureWritable_ReadOnly(t *testing.T) {
 		t.Fatalf("got %T", err)
 	}
 }
+
+func TestEnsureWritable_LabAllowsWithoutSession(t *testing.T) {
+	a, _ := testApp(t)
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("lab should allow writes without session: %v", err)
+	}
+}
+
+func TestEnsureWritable_ProdRequiresSafeSession(t *testing.T) {
+	a, _ := testApp(t)
+	dev := a.Config.Devices["lab"]
+	dev.EnvClass = "prod"
+	a.Config.Devices["lab"] = dev
+
+	err := a.ensureWritable("lab", "/ip/address/add")
+	if err == nil {
+		t.Fatal("expected safe session required")
+	}
+	var req *guardrails.ErrSafeSessionRequired
+	if !errors.As(err, &req) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+
+	if _, err := a.Sessions.Begin("lab", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("with safe session: %v", err)
+	}
+}
+
+func TestEnsureWritable_UnsafeSessionDoesNotSatisfy(t *testing.T) {
+	a, _ := testApp(t)
+	dev := a.Config.Devices["lab"]
+	dev.EnvClass = "staging"
+	a.Config.Devices["lab"] = dev
+	if _, err := a.Sessions.Begin("lab", false); err != nil {
+		t.Fatal(err)
+	}
+	err := a.ensureWritable("lab", "/ip/address/set")
+	if err == nil {
+		t.Fatal("unsafe session should not satisfy staging gate")
+	}
+}
+
+func TestEnsureWritable_ROSStrictTreatsLabAsProd(t *testing.T) {
+	a, _ := testApp(t)
+	t.Setenv("ROS_STRICT", "1")
+	err := a.ensureWritable("lab", "/ip/address/add")
+	if err == nil {
+		t.Fatal("ROS_STRICT should require safe session")
+	}
+	var req *guardrails.ErrSafeSessionRequired
+	if !errors.As(err, &req) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+}
+
+func TestEnsureWritable_BuiltinPathDenied(t *testing.T) {
+	a, _ := testApp(t)
+	err := a.ensureWritable("lab", "/system/reset-configuration")
+	if err == nil {
+		t.Fatal("expected builtin path deny")
+	}
+	var denied *guardrails.ErrPathDenied
+	if !errors.As(err, &denied) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+}
+
+func TestEnsureWritable_MaxSessionChanges(t *testing.T) {
+	a, _ := testApp(t)
+	dev := a.Config.Devices["lab"]
+	dev.EnvClass = "prod"
+	dev.MaxSessionChanges = 2
+	a.Config.Devices["lab"] = dev
+
+	sess, err := a.Sessions.Begin("lab", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := a.Sessions.AppendChange(sess, session.Change{Command: "/ip/address/add"}); err != nil {
+			t.Fatal(err)
+		}
+		// Reload active after write.
+		sess, err = a.Sessions.Active("lab")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	err = a.ensureWritable("lab", "/ip/address/add")
+	if err == nil {
+		t.Fatal("expected max changes error")
+	}
+	var maxErr *guardrails.ErrMaxChanges
+	if !errors.As(err, &maxErr) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+}
+
+func TestEnsureWritable_Allowlist(t *testing.T) {
+	a, _ := testApp(t)
+	dev := a.Config.Devices["lab"]
+	dev.AllowedWritePaths = []string{"/ip/address"}
+	a.Config.Devices["lab"] = dev
+
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("allowed: %v", err)
+	}
+	err := a.ensureWritable("lab", "/ip/route/add")
+	if err == nil {
+		t.Fatal("expected allowlist deny")
+	}
+}
+
+func TestEnsureWritable_MaintenanceWindowOutside(t *testing.T) {
+	a, _ := testApp(t)
+	t.Setenv("ROS_SKIP_MAINTENANCE_GATE", "")
+	dev := a.Config.Devices["lab"]
+	// Window that never includes "now" in practice: absolute range already past.
+	dev.MaintenanceWindows = []string{"2020-01-01T00:00:00Z/2020-01-01T01:00:00Z"}
+	a.Config.Devices["lab"] = dev
+
+	err := a.ensureWritable("lab", "/ip/address/add")
+	if err == nil {
+		t.Fatal("expected outside maintenance window")
+	}
+	var outside *guardrails.ErrOutsideMaintenanceWindow
+	if !errors.As(err, &outside) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+}
+
+func TestEnsureWritable_MaintenanceWindowForceBypass(t *testing.T) {
+	a, _ := testApp(t)
+	t.Setenv("ROS_SKIP_MAINTENANCE_GATE", "")
+	dev := a.Config.Devices["lab"]
+	dev.MaintenanceWindows = []string{"2020-01-01T00:00:00Z/2020-01-01T01:00:00Z"}
+	a.Config.Devices["lab"] = dev
+
+	if err := a.ensureWritableForce("lab", "/ip/address/add", true); err != nil {
+		t.Fatalf("force should bypass: %v", err)
+	}
+
+	a.Force = true
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("App.Force should bypass: %v", err)
+	}
+}
+
+func TestEnsureWritable_MaintenanceWindowSkipEnv(t *testing.T) {
+	a, _ := testApp(t)
+	t.Setenv("ROS_SKIP_MAINTENANCE_GATE", "1")
+	dev := a.Config.Devices["lab"]
+	dev.MaintenanceWindows = []string{"2020-01-01T00:00:00Z/2020-01-01T01:00:00Z"}
+	a.Config.Devices["lab"] = dev
+
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("ROS_SKIP_MAINTENANCE_GATE should bypass: %v", err)
+	}
+}
+
+func TestEnsureWritable_MaintenanceWindowInside(t *testing.T) {
+	a, _ := testApp(t)
+	t.Setenv("ROS_SKIP_MAINTENANCE_GATE", "")
+	dev := a.Config.Devices["lab"]
+	// Far-future absolute window that includes a long range covering "now"... use open weekly all days.
+	dev.MaintenanceWindows = []string{"Mon-Sun 00:00-23:59"}
+	a.Config.Devices["lab"] = dev
+
+	if err := a.ensureWritable("lab", "/ip/address/add"); err != nil {
+		t.Fatalf("inside window: %v", err)
+	}
+}
+
+func TestApplySetMutationDryRunBypassesProdSessionGate(t *testing.T) {
+	a, mock := testApp(t)
+	dev := a.Config.Devices["lab"]
+	dev.EnvClass = "prod"
+	a.Config.Devices["lab"] = dev
+
+	mock.RunFunc = func(_ context.Context, command string, _ ...string) (*client.Result, error) {
+		if strings.HasSuffix(command, "/print") {
+			return &client.Result{Sentences: []map[string]string{{"ddns-enabled": "auto"}}}, nil
+		}
+		t.Fatalf("unexpected Run during dry-run: %s", command)
+		return nil, nil
+	}
+
+	cmd := &cobra.Command{Use: "set"}
+	attachDryRunFlag(cmd)
+	if err := cmd.PersistentFlags().Set(dryRunFlag, "true"); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := applySetMutation(context.Background(), a, mock, cmd, "lab", "/ip/cloud", "/ip/cloud/set",
+		[]string{"=ddns-enabled=auto"})
+	if err != nil {
+		t.Fatalf("dry-run on prod without session should succeed: %v", err)
+	}
+	if !strings.Contains(buf.String(), "dry-run:") {
+		t.Fatalf("expected dry-run output: %s", buf.String())
+	}
+}
+
 
 func TestDeviceListRender(t *testing.T) {
 	a, _ := testApp(t)
@@ -558,6 +778,15 @@ func TestDeriveFindingsClean(t *testing.T) {
 			{"name": "ssh", "disabled": "false"},
 		},
 		"ip_cloud": []map[string]string{{"ddns-enabled": "auto", "status": "updated"}},
+		"wireguard_peers": []map[string]string{
+			{"interface": "wg0", "last-handshake": "00:01:00"},
+		},
+		"netwatch": []map[string]string{
+			{"host": "1.1.1.1", "status": "up"},
+		},
+		"dns_static": []map[string]string{
+			{"name": "a.example", "type": "A", "address": "1.2.3.4"},
+		},
 	}
 	got := deriveFindings(sections)
 	joined := strings.Join(got, "\n")
@@ -569,6 +798,9 @@ func TestDeriveFindingsClean(t *testing.T) {
 		"ok: DHCP leases clean",
 		"ok: no dangerous cleartext services",
 		"ok: cloud DDNS not forced on",
+		"ok: no WireGuard peers stale after 15m",
+		"ok: netwatch all up",
+		"ok: DNS static tidy",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in:\n%s", want, joined)
@@ -576,6 +808,91 @@ func TestDeriveFindingsClean(t *testing.T) {
 	}
 	if strings.Contains(joined, "warn:") || strings.Contains(joined, "info:") {
 		t.Fatalf("expected clean findings only:\n%s", joined)
+	}
+}
+
+func TestDeriveFindingsWGNetwatchDNS(t *testing.T) {
+	t.Parallel()
+	sections := map[string]interface{}{
+		"wireguard_peers": []map[string]string{
+			{"interface": "wg0", "last-handshake": "00:20:00", "comment": "stale"},
+			{"interface": "wg0", "last-handshake": "never", "comment": "dead"},
+			{"interface": "wg0", "last-handshake": "00:01:00", "comment": "fresh"},
+			{"interface": "wg0", "last-handshake": "", "disabled": "true", "comment": "ignored"},
+		},
+		"netwatch": []map[string]string{
+			{"host": "8.8.8.8", "status": "up"},
+			{"host": "10.0.0.1", "status": "down"},
+			{"host": "10.0.0.2", "status": "host-down"},
+			{"host": "10.0.0.3", "status": "down", "disabled": "true"},
+			{"host": "10.0.0.4", "up": "false"},
+		},
+		"dns_static": func() []map[string]string {
+			rows := make([]map[string]string, 0, 55)
+			for i := 0; i < 51; i++ {
+				rows = append(rows, map[string]string{
+					"name":    fmt.Sprintf("host%d.example", i),
+					"type":    "A",
+					"address": "1.2.3.4",
+				})
+			}
+			// Five disabled + one duplicate name+type.
+			for i := 0; i < 5; i++ {
+				rows = append(rows, map[string]string{
+					"name":     fmt.Sprintf("off%d.example", i),
+					"type":     "A",
+					"disabled": "true",
+				})
+			}
+			rows = append(rows, map[string]string{"name": "host0.example", "type": "A", "address": "9.9.9.9"})
+			return rows
+		}(),
+	}
+	got := deriveFindings(sections)
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{
+		"warn: 2 WireGuard peer(s) stale (>15m/never)",
+		"wg peers --stale-after 15m",
+		"warn: 3 netwatch host(s) down",
+		"get netwatch",
+		"warn:",
+		"DNS static entries (>50)",
+		"dns static list",
+		"warn: 5 disabled DNS static",
+		"warn: 1 duplicate DNS static name+type",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in findings:\n%s", want, joined)
+		}
+	}
+	for _, no := range []string{
+		"ok: no WireGuard",
+		"ok: netwatch all up",
+		"ok: DNS static tidy",
+	} {
+		if strings.Contains(joined, no) {
+			t.Fatalf("unexpected ok %q in:\n%s", no, joined)
+		}
+	}
+}
+
+func TestDNSStaticClutterHeuristicOnlyDisabled(t *testing.T) {
+	t.Parallel()
+	rows := []map[string]string{
+		{"name": "a.example", "type": "A"},
+		{"name": "b.example", "disabled": "true"},
+		{"name": "c.example", "disabled": "true"},
+		{"name": "d.example", "disabled": "true"},
+		{"name": "e.example", "disabled": "true"},
+		{"name": "f.example", "disabled": "true"},
+	}
+	got := dnsStaticClutterFindings(rows)
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "warn: 5 disabled DNS static") {
+		t.Fatalf("want disabled warn, got:\n%s", joined)
+	}
+	if strings.Contains(joined, ">50") || strings.Contains(joined, "duplicate") {
+		t.Fatalf("unexpected other warns:\n%s", joined)
 	}
 }
 
@@ -607,7 +924,7 @@ func TestGetCommandTree(t *testing.T) {
 	for _, c := range cmd.Commands() {
 		subs[c.Name()] = true
 	}
-	for _, want := range []string{"system", "interface", "ip", "firewall", "dhcp"} {
+	for _, want := range []string{"system", "interface", "ip", "firewall", "dns", "dhcp"} {
 		if !subs[want] {
 			t.Errorf("missing get %s", want)
 		}

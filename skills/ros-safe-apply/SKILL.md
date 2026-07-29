@@ -4,7 +4,7 @@ description: "Trigger: ros apply, safe session, rollback, firewall change, rotat
 license: MIT
 metadata:
   author: nic0der-im
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 ## Activation Contract
@@ -26,6 +26,9 @@ Load when the user approves applying RouterOS changes with `ros` (firewall, IP, 
 
 | Change type | Pattern |
 |-------------|---------|
+| Before any write (prod / FINDINGS) | `ros -d DEV --read-only doctor` — refresh FINDINGS; required freshness on prod |
+| Diagnose before/after apply | `diag log --topics … --since …`; `diag ping\|neighbors\|traceroute` when relevant |
+| Stale WG / down hosts / DNS | `wg peers --stale-after`, `get netwatch`, `get dns/static` |
 | Add firewall rule | `create firewall/filter chain=... action=...` |
 | Fix NAT WAN | `set firewall/nat .id=*N out-interface=ether1` |
 | DHCP lease-time | `set dhcp/server .id=*1 lease-time=1d` |
@@ -35,6 +38,7 @@ Load when the user approves applying RouterOS changes with `ros` (firewall, IP, 
 | Fresh on-router binary backup | `backup binary` (default UTC `ros-backup-YYYYMMDD-HHMMSS`) |
 | Rotate user password | `set user .id=*2 password=...` (stdin) |
 | WAN-facing / risk of lockout | start `session watch` before changes |
+| Gate / session failure | See `references/safety-and-recovery.md` (pointer to ros pack) |
 | Unknown menu | raw path from `ros domains` or `/path` |
 
 ## When to use `session watch`
@@ -46,13 +50,15 @@ Load when the user approves applying RouterOS changes with `ros` (firewall, IP, 
 ## Execution Steps
 
 1. Confirm target: `ros device get DEV` / `device test`.
-2. Optional pre-backup: `ros -d DEV backup export --file ./DEV-$(date +%F).rsc` and/or `backup binary --output ./backups/`.
-3. `ros -d DEV session begin --safe`.
-4. For WAN-facing or risky changes: `ros -d DEV session watch` in another terminal (auto-rollback on link loss).
-5. Apply minimal commands; for files: download with `file get` before `file remove` on the router.
-6. `ros -d DEV session status` — review journal (singleton `set` should show Changes > 0).
-7. `ros -d DEV session commit` on success, else `session rollback`.
-8. Verify with `--read-only get ... -o json` / `file list`.
+2. `ros -d DEV --read-only doctor` — address FINDINGS; prod needs fresh doctor before writes.
+3. Optional pre-backup: `ros -d DEV backup export --file ./DEV-$(date +%F).rsc` and/or `backup binary --output ./backups/`.
+4. Preview with `--dry-run` on mutate verbs when useful.
+5. `ros -d DEV session begin --safe`.
+6. For WAN-facing or risky changes: `ros -d DEV session watch` in another terminal (auto-rollback on link loss).
+7. Apply minimal commands; for files: download with `file get` before `file remove` on the router.
+8. `ros -d DEV session status` — review journal (singleton `set` should show Changes > 0).
+9. `ros -d DEV session commit` on success, else `session rollback`.
+10. Verify with `--read-only get ... -o json` / `diag …` / `file list`.
 
 ## Output Contract
 
@@ -64,3 +70,5 @@ Load when the user approves applying RouterOS changes with `ros` (firewall, IP, 
 
 - `references/commands.md`
 - `references/agents.md`
+- `references/safety-and-recovery.md` — short pointer; full map in the `ros` pack
+- `references/routeros-docs.md` — short pointer; official doc index in the `ros` pack

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/config"
+	"github.com/nic0der-im/routeros-cli/internal/guardrails"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
@@ -28,12 +31,27 @@ func newSessionCmd() *cobra.Command {
 	return cmd
 }
 
+const forceNoBackupNote = "force-no-backup"
+
+// backupsBaseDirForTest overrides ~/.config/ros/backups in unit tests.
+var backupsBaseDirForTest string
+
+// preSessionBackupFn is the dial+export hook for session begin (overridable in tests).
+var preSessionBackupFn = takePreSessionBackup
+
 func newSessionBeginCmd() *cobra.Command {
 	safe := true
+	forceNoBackup := false
 
 	cmd := &cobra.Command{
 		Use:   "begin",
 		Short: "Begin a safe change session for the current device",
+		Long: `Begin a change session for the current device.
+
+On env_class=prod (or ROS_STRICT=1), --safe sessions take a local text backup
+first under ~/.config/ros/backups/<device>/<timestamp>/. Failure refuses begin.
+Use --force-no-backup only as break-glass (prints a strong warning and notes
+the session). Staging/lab skip the backup unless require_backup_before_write=true.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := loadApp()
 			if err != nil {
@@ -45,19 +63,178 @@ func newSessionBeginCmd() *cobra.Command {
 				return err
 			}
 
-			sess, err := a.Sessions.Begin(name, safe)
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Session %s started on %q (safe=%v)\n", sess.ID, name, sess.Safe)
-			fmt.Fprintf(cmd.OutOrStdout(), "Tip: run `ros -d %s session watch` in another terminal for link-loss auto-rollback\n", name)
-			return nil
+			return runSessionBegin(cmd.Context(), a, name, safe, forceNoBackup, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 
 	cmd.Flags().BoolVar(&safe, "safe", true, "enable safe journaling (default true)")
+	cmd.Flags().BoolVar(&forceNoBackup, "force-no-backup", false, "skip mandatory pre-session text backup (break-glass; prod/require_backup_before_write)")
 	return cmd
+}
+
+func sessionBeginNeedsBackup(safe bool, envClass string, deviceRequire, forceNoBackup bool) bool {
+	if !safe || forceNoBackup {
+		return false
+	}
+	return guardrails.RequireBackupBeforeSafeSession(envClass, deviceRequire)
+}
+
+// warnDoctorFreshness prints a loud warning when doctor/hygiene is missing or stale.
+// Never refuses session begin (hard gate lives in ensureWritable).
+func warnDoctorFreshness(envClass, deviceName string, force bool, errW io.Writer) {
+	last, ok, err := guardrails.LoadLastDoctorAt(deviceName)
+	if err != nil {
+		fmt.Fprintf(errW, "WARNING: could not read doctor state: %v\n", err)
+		return
+	}
+	warning, gateErr := guardrails.EvaluateDoctorGate(guardrails.DoctorGateOpts{
+		EnvClass:   envClass,
+		DeviceName: deviceName,
+		LastAt:     last,
+		HasLast:    ok,
+		Now:        time.Now(),
+		MaxAge:     guardrails.DefaultDoctorMaxAge,
+		Force:      force,
+		SkipEnv:    guardrails.ROSSkipDoctorGate(),
+	})
+	if warning != "" {
+		fmt.Fprintln(errW, warning)
+		return
+	}
+	if gateErr != nil {
+		fmt.Fprintf(errW, "WARNING: %s\n", gateErr.Error())
+	}
+}
+
+func runSessionBegin(ctx context.Context, a *App, name string, safe, forceNoBackup bool, out, errW io.Writer) error {
+	dev := a.deviceConfig(name)
+	envClass := config.EffectiveEnvClass(dev, a.effectiveStrict())
+	needBackup := sessionBeginNeedsBackup(safe, envClass, dev.RequireBackupBeforeWrite, forceNoBackup)
+
+	var (
+		backupDir string
+		note      string
+	)
+
+	if safe && forceNoBackup && guardrails.RequireBackupBeforeSafeSession(envClass, dev.RequireBackupBeforeWrite) {
+		note = forceNoBackupNote
+		fmt.Fprintf(errW, "WARNING: skipping mandatory pre-session backup on %s device %q (--force-no-backup). Proceed only if you already have a verified local export.\n", envClass, name)
+	} else if needBackup {
+		dir, err := prepareSessionBackupDir(name, time.Now())
+		if err != nil {
+			return err
+		}
+		saved, err := preSessionBackupFn(ctx, a, name, dir, out)
+		if err != nil {
+			_ = os.RemoveAll(dir)
+			return fmt.Errorf("refusing session begin: pre-session backup failed: %w\nHint: fix connectivity/export, or use --force-no-backup only as break-glass", err)
+		}
+		backupDir = dir
+		fmt.Fprintf(out, "Pre-session backup saved to %q\n", saved)
+	}
+
+	// Soft doctor freshness warning for prod/staging before the first mutate.
+	// Session begin never hard-refuses on doctor age; ensureWritable does.
+	if safe {
+		warnDoctorFreshness(envClass, name, a.Force, errW)
+	}
+
+	sess, err := a.Sessions.BeginWith(name, session.BeginOpts{
+		Safe:      safe,
+		Note:      note,
+		BackupDir: backupDir,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Session %s started on %q (safe=%v)\n", sess.ID, name, sess.Safe)
+	if sess.BackupDir != "" {
+		fmt.Fprintf(out, "  Backup:     %s\n", sess.BackupDir)
+	}
+	if sess.Note != "" {
+		fmt.Fprintf(out, "  Note:       %s\n", sess.Note)
+	}
+	fmt.Fprintf(out, "Tip: run `ros -d %s session watch` in another terminal for link-loss auto-rollback\n", name)
+	return nil
+}
+
+func defaultBackupsDir() string {
+	if backupsBaseDirForTest != "" {
+		return backupsBaseDirForTest
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+		if home == "" {
+			home = "."
+		}
+	}
+	return filepath.Join(home, ".config", "ros", "backups")
+}
+
+func sanitizeBackupDevice(name string) string {
+	out := make([]rune, 0, len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			out = append(out, r)
+		default:
+			out = append(out, '_')
+		}
+	}
+	s := string(out)
+	if s == "" {
+		return "device"
+	}
+	return s
+}
+
+func prepareSessionBackupDir(device string, t time.Time) (string, error) {
+	dir := filepath.Join(defaultBackupsDir(), sanitizeBackupDevice(device), t.UTC().Format("20060102-150405"))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating backup directory %q: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// takePreSessionBackup connects and writes a text export into destDir.
+// Skips ensureWritable so prod can backup before the safe session exists.
+func takePreSessionBackup(ctx context.Context, a *App, deviceName, destDir string, w io.Writer) (string, error) {
+	c, name, err := a.connect(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = c.Close() }()
+	if name != "" {
+		deviceName = name
+	}
+
+	_, dev, err := a.Inventory.Resolve(flagDevice)
+	if err != nil {
+		return "", err
+	}
+	pass, err := a.Creds.Get(deviceName)
+	if err != nil {
+		return "", err
+	}
+
+	out, n, err := exportTextToLocal(ctx, c, deviceName, exportTextOptions{
+		DestPath:     destDir,
+		Via:          "sftp",
+		EphemeralSSH: true,
+		Host:         hostOnly(dev.Address),
+		User:         dev.Username,
+		Pass:         pass,
+		Status:       statusWriter(w),
+	})
+	if err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return "", fmt.Errorf("empty export from %q", deviceName)
+	}
+	return out, nil
 }
 
 func newSessionCommitCmd() *cobra.Command {
@@ -121,38 +298,42 @@ func newSessionRollbackCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rollback",
 		Short: "Roll back the active session by applying inverses in reverse order",
-		Run: func(cmd *cobra.Command, args []string) {
-			a, err := loadApp()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-				os.Exit(ExitConfError)
-			}
-
-			name, _, err := a.Inventory.Resolve(flagDevice)
-			if err != nil {
-				a.renderError(os.Stderr, "config_error", err.Error(), "")
-				os.Exit(ExitConfError)
-			}
-
-			sess, err := a.Sessions.Active(name)
-			if err != nil {
-				a.renderError(os.Stderr, "session_error", err.Error(), name)
-				os.Exit(ExitCmdError)
-			}
-			if sess == nil {
-				a.renderError(os.Stderr, "session_error", fmt.Sprintf("no active session for device %q", name), name)
-				os.Exit(ExitCmdError)
-			}
-
-			runWithClient(cmd, "/session/rollback", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := applySessionRollback(ctx, a, c, sess, cmd.OutOrStdout()); err != nil {
-					return err
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Session %s rolled back on %q\n", sess.ID, deviceName)
-				return nil
-			})
-		},
+		Run:   runSessionRollback,
 	}
+}
+
+// runSessionRollback applies inverse journal entries for the active session.
+// Shared by ros session rollback and ros plan rollback.
+func runSessionRollback(cmd *cobra.Command, args []string) {
+	a, err := loadApp()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(ExitConfError)
+	}
+
+	name, _, err := a.Inventory.Resolve(flagDevice)
+	if err != nil {
+		a.renderError(os.Stderr, "config_error", err.Error(), "")
+		os.Exit(ExitConfError)
+	}
+
+	sess, err := a.Sessions.Active(name)
+	if err != nil {
+		a.renderError(os.Stderr, "session_error", err.Error(), name)
+		os.Exit(ExitCmdError)
+	}
+	if sess == nil {
+		a.renderError(os.Stderr, "session_error", fmt.Sprintf("no active session for device %q", name), name)
+		os.Exit(ExitCmdError)
+	}
+
+	runWithClient(cmd, "/session/rollback", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+		if err := applySessionRollback(ctx, a, c, sess, cmd.OutOrStdout()); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Session %s rolled back on %q\n", sess.ID, deviceName)
+		return nil
+	})
 }
 
 func newSessionWatchCmd() *cobra.Command {
@@ -263,15 +444,10 @@ func newSessionStatusCmd() *cobra.Command {
 			w := cmd.OutOrStdout()
 			if sess == nil {
 				if a.OutFormat == output.FormatJSON {
-					return output.RenderRawJSON(w, map[string]interface{}{
+					return a.renderRawJSON(w, map[string]interface{}{
 						"active": false,
 						"device": name,
-					}, output.Meta{
-						Device:    name,
-						Command:   "session status",
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-						Count:     0,
-					})
+					}, a.newMeta(name, "session status", 0))
 				}
 				fmt.Fprintf(w, "No active session for device %q\n", name)
 				return nil
@@ -282,12 +458,7 @@ func newSessionStatusCmd() *cobra.Command {
 			}
 
 			if a.OutFormat == output.FormatJSON {
-				return output.RenderRawJSON(w, sess, output.Meta{
-					Device:    name,
-					Command:   "session status",
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Count:     len(sess.Changes),
-				})
+				return a.renderRawJSON(w, sess, a.newMeta(name, "session status", len(sess.Changes)))
 			}
 
 			fmt.Fprintf(w, "Session %s\n", sess.ID)
@@ -295,6 +466,12 @@ func newSessionStatusCmd() *cobra.Command {
 			fmt.Fprintf(w, "  Status:     %s\n", sess.Status)
 			fmt.Fprintf(w, "  Safe:       %v\n", sess.Safe)
 			fmt.Fprintf(w, "  Pending RB: %v\n", sess.AutoRollbackPending)
+			if sess.BackupDir != "" {
+				fmt.Fprintf(w, "  Backup:     %s\n", sess.BackupDir)
+			}
+			if sess.Note != "" {
+				fmt.Fprintf(w, "  Note:       %s\n", sess.Note)
+			}
 			fmt.Fprintf(w, "  Started:    %s\n", sess.StartedAt.Format(time.RFC3339))
 			fmt.Fprintf(w, "  Updated:    %s\n", sess.UpdatedAt.Format(time.RFC3339))
 			fmt.Fprintf(w, "  Changes:    %d\n", len(sess.Changes))

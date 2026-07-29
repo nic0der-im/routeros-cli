@@ -25,7 +25,7 @@ ros device import --from winbox [--dry-run] [--with-passwords]
 ```sh
 export ROS_READ_ONLY=1 ROS_DEFAULT_OUTPUT=json
 ros -d DEV audit --profile full          # also: network|security|hygiene
-ros -d DEV doctor                        # hygiene + FINDINGS footer (human)
+ros -d DEV doctor                        # hygiene + FINDINGS; run before proposing/prod writes
 ros -d DEV audit --skip-cpu-profile      # low-RAM / faster iteration
 ros -d DEV audit --show-ppp              # include PPPoE/PPP in human summary
 ros -d DEV get firewall/filter           # prefer without --raw (secrets redacted)
@@ -36,6 +36,19 @@ ros -d DEV file list
 
 Human audit: boxed columns; iface RX/TX = cumulative bytes (not live Mbps).  
 `--raw` / unredacted secrets: avoid for WireGuard `private-key` and passwords.
+
+## Diagnose loop
+
+```sh
+ros -d DEV doctor                        # FINDINGS first (WG stale, netwatch down, DNS clutter, …)
+ros -d DEV diag log --topics firewall,error --since 15m
+ros -d DEV diag ping 1.1.1.1 --count 4
+ros -d DEV diag neighbors
+ros -d DEV diag traceroute 8.8.8.8
+ros -d DEV wg peers --stale-after 15m    # read-only annotate; no auto-delete
+ros -d DEV get netwatch
+ros -d DEV get dns/static
+```
 
 ## Files / backup
 
@@ -53,9 +66,12 @@ LAN with SSH already allowlisted: add `--ephemeral-ssh=false` on SFTP downloads.
 
 ```sh
 unset ROS_READ_ONLY
+ros -d DEV doctor                        # prod freshness gate
 ros -d DEV session begin --safe
 ros -d DEV create firewall/filter chain=forward action=accept ...
 ros -d DEV session commit
 ```
 
-Exit codes: 0 OK · 1 cmd · 2 conn · 3 config · 4 read-only violation
+Exit codes: 0 OK · 1 cmd · 2 conn · 3 config · 4 read-only violation  
+
+Recovery map: `references/safety-and-recovery.md`

@@ -6,7 +6,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/nic0der-im/routeros-cli/internal/apperr"
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/diff"
 	"github.com/nic0der-im/routeros-cli/internal/domains"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/rosapi"
@@ -112,23 +114,62 @@ func runGenericCreate(cmd *cobra.Command, args []string) {
 	rosCmd := pathCommand(path, "add")
 	apiArgs := parseAPIArgs(rest)
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-		if err := a.ensureWritable(rosCmd); err != nil {
-			return err
+		return applyCreateMutation(ctx, a, c, cmd, deviceName, path, rosCmd, apiArgs)
+	})
+}
+
+// applyCreateMutation creates a resource, or emits a dry-run preview (no write/journal).
+// Idempotent: DiffCreate already_exists → action=already_exists without writing.
+func applyCreateMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string) error {
+	if isDryRun(cmd) {
+		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+			Verb: "create", Path: path, Command: rosCmd, Args: apiArgs,
+		})
+	}
+	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+		return err
+	}
+
+	desired := argsToPropMap(apiArgs)
+	var createDiff *diff.Diff
+	if rows, err := fetchAllRows(ctx, c, path); err == nil {
+		action, d, existingID := classifyCreateOutcome(path, rows, desired)
+		createDiff = &d
+		if action == ActionAlreadyExists {
+			return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+				Action:  ActionAlreadyExists,
+				Verb:    "create",
+				Path:    path,
+				Command: rosCmd,
+				Args:    apiArgs,
+				ID:      existingID,
+				Summary: fmt.Sprintf("Already exists: %s on %s", path, deviceName),
+				Diff:    &d,
+			})
 		}
-		result, err := c.Run(ctx, rosCmd, apiArgs...)
-		if err != nil {
-			return err
-		}
-		if err := recordCreateChange(a, deviceName, rosCmd, apiArgs, result); err != nil {
-			return err
-		}
-		id := extractCreatedID(result)
-		if id != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "Created %s (.id=%s) on %s\n", path, id, deviceName)
-		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "Created %s on %s\n", path, deviceName)
-		}
-		return nil
+	}
+
+	result, err := c.Run(ctx, rosCmd, apiArgs...)
+	if err != nil {
+		return apperr.MaybeAmbiguousWrite(err)
+	}
+	if err := recordCreateChange(a, deviceName, rosCmd, apiArgs, result); err != nil {
+		return err
+	}
+	id := extractCreatedID(result)
+	summary := fmt.Sprintf("Created %s on %s", path, deviceName)
+	if id != "" {
+		summary = fmt.Sprintf("Created %s (.id=%s) on %s", path, id, deviceName)
+	}
+	return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+		Action:  ActionCreated,
+		Verb:    "create",
+		Path:    path,
+		Command: rosCmd,
+		Args:    apiArgs,
+		ID:      id,
+		Summary: summary,
+		Diff:    createDiff,
 	})
 }
 
@@ -152,32 +193,88 @@ func runGenericSet(cmd *cobra.Command, args []string) {
 	if tip != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), tip)
 	}
-	id := findIDArg(apiArgs)
+	comment := getCommentTarget(cmd)
+	if comment != "" {
+		if findIDArg(apiArgs) != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Error: specify either .id or --comment, not both")
+			return
+		}
+		if !supportsCommentAsID(path) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: --comment targeting is only supported for firewall/filter and firewall/mangle, not %s\n", path)
+			return
+		}
+	}
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-		if err := a.ensureWritable(rosCmd); err != nil {
-			return err
-		}
-		// Snapshot pre-state for both row sets (.id) and singleton menus (no .id).
-		pre, _ := fetchPreState(ctx, c, path, id)
-		_, err := c.Run(ctx, rosCmd, apiArgs...)
-		if err != nil {
-			return err
-		}
-		if inv := session.BuildSetInverse(rosCmd, id, pre, apiArgs); len(inv) > 0 {
-			note := "set singleton"
-			if id != "" {
-				note = "set " + id
+		argsForMut := apiArgs
+		if comment != "" {
+			resolved, err := resolveIDByComment(ctx, c, path, comment)
+			if err != nil {
+				return err
 			}
-			_ = a.recordSafeChange(deviceName, session.Change{
-				Command:  rosCmd,
-				Args:     apiArgs,
-				Inverse:  inv,
-				PreState: pre,
-				Note:     note,
-			})
+			argsForMut = ensureIDArg(apiArgs, resolved)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Updated %s on %s\n", path, deviceName)
-		return nil
+		return applySetMutation(ctx, a, c, cmd, deviceName, path, rosCmd, argsForMut)
+	})
+}
+
+// applySetMutation updates a resource, or emits a dry-run preview (no write/journal).
+// DiffSet with no property changes → action=no_change without writing.
+func applySetMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string) error {
+	id := findIDArg(apiArgs)
+	// Optional read for property diffs / journaling context.
+	pre, _ := fetchPreState(ctx, c, path, id)
+	if isDryRun(cmd) {
+		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+			Verb: "set", Path: path, Command: rosCmd, Args: apiArgs, Pre: pre,
+		})
+	}
+	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+		return err
+	}
+
+	desired := argsToPropMap(apiArgs)
+	action, d := classifySetOutcome(path, pre, desired)
+	if action == ActionNoChange {
+		return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+			Action:  ActionNoChange,
+			Verb:    "set",
+			Path:    path,
+			Command: rosCmd,
+			Args:    apiArgs,
+			ID:      id,
+			Summary: fmt.Sprintf("No change: %s on %s", path, deviceName),
+			Diff:    &d,
+			Pre:     pre,
+		})
+	}
+
+	_, err := c.Run(ctx, rosCmd, apiArgs...)
+	if err != nil {
+		return apperr.MaybeAmbiguousWrite(err)
+	}
+	if inv := session.BuildSetInverse(rosCmd, id, pre, apiArgs); len(inv) > 0 {
+		note := "set singleton"
+		if id != "" {
+			note = "set " + id
+		}
+		_ = a.recordSafeChange(deviceName, session.Change{
+			Command:  rosCmd,
+			Args:     apiArgs,
+			Inverse:  inv,
+			PreState: pre,
+			Note:     note,
+		})
+	}
+	return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+		Action:  ActionUpdated,
+		Verb:    "set",
+		Path:    path,
+		Command: rosCmd,
+		Args:    apiArgs,
+		ID:      id,
+		Summary: fmt.Sprintf("Updated %s on %s", path, deviceName),
+		Diff:    &d,
+		Pre:     pre,
 	})
 }
 
@@ -194,30 +291,70 @@ func runGenericDelete(cmd *cobra.Command, args []string) {
 	rosCmd := pathCommand(path, "remove")
 	apiArgs := parseAPIArgs(rest)
 	id := findIDArg(apiArgs)
-	if id == "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: delete requires .id=*N\n")
+	comment := getCommentTarget(cmd)
+	if id != "" && comment != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Error: specify either .id or --comment, not both")
+		return
+	}
+	if id == "" && comment == "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Error: delete requires .id=*N (or --comment for firewall/filter|mangle)")
+		return
+	}
+	if comment != "" && !supportsCommentAsID(path) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: --comment targeting is only supported for firewall/filter and firewall/mangle, not %s\n", path)
 		return
 	}
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-		if err := a.ensureWritable(rosCmd); err != nil {
-			return err
+		resolved := id
+		argsForMut := apiArgs
+		if comment != "" {
+			var err error
+			resolved, err = resolveIDByComment(ctx, c, path, comment)
+			if err != nil {
+				return err
+			}
+			argsForMut = ensureIDArg(apiArgs, resolved)
 		}
-		pre, _ := fetchPreState(ctx, c, path, id)
-		_, err := c.Run(ctx, rosCmd, apiArgs...)
-		if err != nil {
-			return err
-		}
-		if inv := session.BuildRemoveInverse(rosCmd, pre); len(inv) > 0 {
-			_ = a.recordSafeChange(deviceName, session.Change{
-				Command:  rosCmd,
-				Args:     apiArgs,
-				Inverse:  inv,
-				PreState: pre,
-				Note:     "delete " + id,
-			})
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s %s on %s\n", path, id, deviceName)
-		return nil
+		return applyDeleteMutation(ctx, a, c, cmd, deviceName, path, rosCmd, argsForMut, resolved)
+	})
+}
+
+// applyDeleteMutation removes a resource, or emits a dry-run preview (no write/journal).
+func applyDeleteMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string, id string) error {
+	pre, preErr := fetchPreState(ctx, c, path, id)
+	if isDryRun(cmd) {
+		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+			Verb: "delete", Path: path, Command: rosCmd, Args: apiArgs, Pre: pre,
+		})
+	}
+	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+		return err
+	}
+	if pre == nil && preErr == nil {
+		return apperr.New(apperr.KindNotFound, fmt.Sprintf("%s %s not found", path, id))
+	}
+	_, err := c.Run(ctx, rosCmd, apiArgs...)
+	if err != nil {
+		return apperr.MaybeAmbiguousWrite(err)
+	}
+	if inv := session.BuildRemoveInverse(rosCmd, pre); len(inv) > 0 {
+		_ = a.recordSafeChange(deviceName, session.Change{
+			Command:  rosCmd,
+			Args:     apiArgs,
+			Inverse:  inv,
+			PreState: pre,
+			Note:     "delete " + id,
+		})
+	}
+	return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+		Action:  ActionRemoved,
+		Verb:    "delete",
+		Path:    path,
+		Command: rosCmd,
+		Args:    apiArgs,
+		ID:      id,
+		Summary: fmt.Sprintf("Deleted %s %s on %s", path, id, deviceName),
+		Pre:     pre,
 	})
 }
 
@@ -231,49 +368,126 @@ func runGenericEnableDisable(action string) func(cmd *cobra.Command, args []stri
 		rosCmd := pathCommand(path, action)
 		apiArgs := parseAPIArgs(rest)
 		id := findIDArg(apiArgs)
-		if id == "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s requires .id=*N\n", action)
+		comment := getCommentTarget(cmd)
+		if id != "" && comment != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Error: specify either .id or --comment, not both")
+			return
+		}
+		if id == "" && comment == "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s requires .id=*N (or --comment for firewall/filter|mangle)\n", action)
+			return
+		}
+		if comment != "" && !supportsCommentAsID(path) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: --comment targeting is only supported for firewall/filter and firewall/mangle, not %s\n", path)
 			return
 		}
 		runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-			if err := a.ensureWritable(rosCmd); err != nil {
-				return err
+			resolved := id
+			argsForMut := apiArgs
+			if comment != "" {
+				var err error
+				resolved, err = resolveIDByComment(ctx, c, path, comment)
+				if err != nil {
+					return err
+				}
+				argsForMut = ensureIDArg(apiArgs, resolved)
 			}
-			_, err := c.Run(ctx, rosCmd, apiArgs...)
-			if err != nil {
-				return err
-			}
-			invAction := "disable"
-			if action == "disable" {
-				invAction = "enable"
-			}
-			_ = recordIDChange(a, deviceName, rosCmd, apiArgs,
-				[]string{pathCommand(path, invAction), "=.id=" + id},
-				action+" "+id)
-			label := action
-			if len(label) > 0 {
-				label = strings.ToUpper(label[:1]) + label[1:]
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%sd %s %s on %s\n", label, path, id, deviceName)
-			return nil
+			return applyEnableDisableMutation(ctx, a, c, cmd, deviceName, path, rosCmd, argsForMut, resolved, action)
 		})
 	}
 }
 
+// applyEnableDisableMutation enables/disables a resource, or emits a dry-run preview.
+// When pre-state shows disabled already matches the target, returns no_change.
+func applyEnableDisableMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string, id, action string) error {
+	pre, _ := fetchPreState(ctx, c, path, id)
+	if isDryRun(cmd) {
+		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+			Verb: action, Path: path, Command: rosCmd, Args: apiArgs, Pre: pre,
+		})
+	}
+	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+		return err
+	}
+
+	desiredDisabled := "false"
+	if action == "disable" {
+		desiredDisabled = "true"
+	}
+	desired := map[string]string{"disabled": desiredDisabled}
+	setAction, d := classifySetOutcome(path, pre, desired)
+	if setAction == ActionNoChange {
+		return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+			Action:  ActionNoChange,
+			Verb:    action,
+			Path:    path,
+			Command: rosCmd,
+			Args:    apiArgs,
+			ID:      id,
+			Summary: fmt.Sprintf("No change: %s %s already %sd on %s", path, id, action, deviceName),
+			Diff:    &d,
+			Pre:     pre,
+		})
+	}
+
+	_, err := c.Run(ctx, rosCmd, apiArgs...)
+	if err != nil {
+		return apperr.MaybeAmbiguousWrite(err)
+	}
+	invAction := "disable"
+	if action == "disable" {
+		invAction = "enable"
+	}
+	_ = recordIDChange(a, deviceName, rosCmd, apiArgs,
+		[]string{pathCommand(path, invAction), "=.id=" + id},
+		action+" "+id)
+	label := action
+	if len(label) > 0 {
+		label = strings.ToUpper(label[:1]) + label[1:]
+	}
+	return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
+		Action:  ActionUpdated,
+		Verb:    action,
+		Path:    path,
+		Command: rosCmd,
+		Args:    apiArgs,
+		ID:      id,
+		Summary: fmt.Sprintf("%sd %s %s on %s", label, path, id, deviceName),
+		Diff:    &d,
+		Pre:     pre,
+	})
+}
+
 func newEnableCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "enable <domain|/path> .id=*N",
 		Short: "Enable a resource",
-		Args:  cobra.MinimumNArgs(1),
-		Run:   runGenericEnableDisable("enable"),
+		Long: `Enable a resource by .id, or by --comment for firewall/filter|mangle.
+
+  ros enable interface .id=*E
+  ros enable firewall/filter --comment allow-web
+  ros enable firewall/mangle --comment mark-conn`,
+		Args: cobra.MinimumNArgs(1),
+		Run:  runGenericEnableDisable("enable"),
 	}
+	attachDryRunFlag(cmd)
+	attachCommentTargetFlag(cmd)
+	return cmd
 }
 
 func newDisableCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "disable <domain|/path> .id=*N",
 		Short: "Disable a resource",
-		Args:  cobra.MinimumNArgs(1),
-		Run:   runGenericEnableDisable("disable"),
+		Long: `Disable a resource by .id, or by --comment for firewall/filter|mangle.
+
+  ros disable interface/wireguard .id=*E
+  ros disable firewall/filter --comment allow-web
+  ros disable firewall/mangle --comment mark-conn`,
+		Args: cobra.MinimumNArgs(1),
+		Run:  runGenericEnableDisable("disable"),
 	}
+	attachDryRunFlag(cmd)
+	attachCommentTargetFlag(cmd)
+	return cmd
 }

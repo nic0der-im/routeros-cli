@@ -166,18 +166,21 @@ func TestRenderJSON(t *testing.T) {
 
 func TestRenderError(t *testing.T) {
 	var buf bytes.Buffer
+	meta := Meta{RequestID: "abc123", Device: "router1"}
 
-	if err := RenderError(&buf, "CONNECTION_FAILED", "dial tcp: connection refused", "router1"); err != nil {
+	if err := RenderError(&buf, "CONNECTION_FAILED", "dial tcp: connection refused", "router1", meta); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var resp struct {
 		OK    bool `json:"ok"`
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			Device  string `json:"device"`
+			Code            string `json:"code"`
+			Message         string `json:"message"`
+			Device          string `json:"device"`
+			SuggestedAction string `json:"suggested_action"`
 		} `json:"error"`
+		Meta Meta `json:"meta"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
@@ -194,6 +197,37 @@ func TestRenderError(t *testing.T) {
 	}
 	if resp.Error.Device != "router1" {
 		t.Fatalf("expected device=router1, got %q", resp.Error.Device)
+	}
+	if resp.Error.SuggestedAction != "" {
+		t.Fatalf("expected empty suggested_action, got %q", resp.Error.SuggestedAction)
+	}
+	if resp.Meta.RequestID != "abc123" {
+		t.Fatalf("expected meta.request_id=abc123, got %q", resp.Meta.RequestID)
+	}
+}
+
+func TestRenderError_SuggestedAction(t *testing.T) {
+	var buf bytes.Buffer
+	hint := "verify with read-only get before retry; do not blindly re-run the write"
+	if err := RenderError(&buf, "timeout", "ambiguous write result", "lab", Meta{RequestID: "rid"}, hint); err != nil {
+		t.Fatal(err)
+	}
+	var resp struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code            string `json:"code"`
+			SuggestedAction string `json:"suggested_action"`
+		} `json:"error"`
+		Meta Meta `json:"meta"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error.Code != "timeout" || resp.Error.SuggestedAction != hint {
+		t.Fatalf("%+v", resp.Error)
+	}
+	if resp.Meta.RequestID != "rid" {
+		t.Fatalf("request_id=%q", resp.Meta.RequestID)
 	}
 }
 

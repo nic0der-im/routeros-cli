@@ -29,14 +29,18 @@ type Change struct {
 
 // Session is a journal of pending changes for a device.
 type Session struct {
-	ID                   string    `json:"id"`
-	Device               string    `json:"device"`
-	Safe                 bool      `json:"safe"`
-	Status               string    `json:"status"`
-	AutoRollbackPending  bool      `json:"auto_rollback_pending,omitempty"`
-	StartedAt            time.Time `json:"started_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	Changes              []Change  `json:"changes"`
+	ID                  string    `json:"id"`
+	Device              string    `json:"device"`
+	Safe                bool      `json:"safe"`
+	Status              string    `json:"status"`
+	AutoRollbackPending bool      `json:"auto_rollback_pending,omitempty"`
+	StartedAt           time.Time `json:"started_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Changes             []Change  `json:"changes"`
+	// BackupDir is the local pre-session text export directory, if taken.
+	BackupDir string `json:"backup_dir,omitempty"`
+	// Note records break-glass or audit hints (e.g. force-no-backup).
+	Note string `json:"note,omitempty"`
 }
 
 // Store persists sessions to disk under a base directory.
@@ -86,8 +90,20 @@ func sanitize(name string) string {
 	return string(out)
 }
 
+// BeginOpts configures a new session.
+type BeginOpts struct {
+	Safe      bool
+	Note      string
+	BackupDir string
+}
+
 // Begin starts a new active session for a device. Only one active session per device.
 func (s *Store) Begin(device string, safe bool) (*Session, error) {
+	return s.BeginWith(device, BeginOpts{Safe: safe})
+}
+
+// BeginWith starts a new active session with optional note/backup metadata.
+func (s *Store) BeginWith(device string, opts BeginOpts) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,11 +115,13 @@ func (s *Store) Begin(device string, safe bool) (*Session, error) {
 	sess := &Session{
 		ID:        fmt.Sprintf("%d", now.UnixNano()),
 		Device:    device,
-		Safe:      safe,
+		Safe:      opts.Safe,
 		Status:    StatusActive,
 		StartedAt: now,
 		UpdatedAt: now,
 		Changes:   []Change{},
+		BackupDir: opts.BackupDir,
+		Note:      opts.Note,
 	}
 
 	if err := s.write(sess); err != nil {

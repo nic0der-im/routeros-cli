@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-29
+
+Enterprise cut: write-safety (A), production guardrails (G), observability (C), curated surface (B), YAML plans (D), and skill packs **0.5.0** (E). Live smoke on lab `home` (doctor, dry-run, session apply+rollback, backup export, plan preview/apply+rollback, read-only denial). Planned 0.6/0.7 feature slices shipped here in one release.
+
+### Added
+- `internal/diff` + global `--dry-run` on create/set/delete/enable/disable; JSON write outcomes `created|updated|removed|already_exists|no_change|dry_run`
+- `apperr` kinds `conflict`/`timeout`/`busy` + `suggested_action`; ambiguous-write policy (no auto-retry after mutating send)
+- Production guardrails: `env_class` prod|staging|lab + `ROS_STRICT`; safe-session gates; `max_session_changes`; path allow/deny; prod backup-before-write on `session begin --safe`; exec denylist + `exec_allow`/`exec_deny`; `ROS_PROFILE` operator|agent|agent-strict; doctor freshness gate; reboot `--confirm`
+- Output caps: `ROS_MAX_OUTPUT_BYTES` (default **512000**), global `--limit N`; `[OUTPUT TRUNCATED]` / `meta.truncated=true`
+- `meta.request_id` on JSON envelopes; `-v` logs include the id
+- NDJSON write audit `~/.config/ros/audit/writes-YYYY-MM-DD.ndjson` (redacted; `ROS_AUDIT=0` disables)
+- `maintenance_windows` on devices; refuse writes outside window unless force / `ROS_SKIP_MAINTENANCE_GATE=1`
+- Destructive `--confirm <exact-inventory-name>` on reboot, `file remove`, `device remove`, `lease cleanup-waiting`
+- Read-only API retries with backoff (`ROS_READ_RETRIES` / `ROS_READ_RETRY_BACKOFF`); writes never retried
+- Domain aliases: dns/static, arp, netwatch, routing/table, bgp/session, ospf*, wifi registration, wg/peers, address-list, ipv6/*, …
+- Curated `dns static` + `firewall address-list` list/add/set/remove (idempotent keys + `--dry-run`)
+- `wg peers --stale-after`, `wifi clients`, `bgp sessions`, `ospf neighbors`
+- `diag log --topics` / `--since` (router clock)
+- Filter/mangle mutate by `--comment` as stable ID
+- FINDINGS: WG stale, netwatch down, DNS static clutter
+- `ros plan preview|apply|rollback` (YAML plans on safe sessions)
+- Skill packs **0.5.0**: `safety-and-recovery.md`, `routeros-docs.md`, diag/doctor gates, AGENTS prompt library, lockstep tests
+
+### Changed
+- Bundled agent skill metadata version **0.5.0**
+
 ## [0.4.0] — 2026-07-29
 
 ### Added

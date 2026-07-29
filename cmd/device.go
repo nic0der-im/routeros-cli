@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/config"
@@ -235,17 +234,31 @@ Two modes:
 }
 
 func newDeviceRemoveCmd() *cobra.Command {
-	var force bool
+	var (
+		force   bool
+		confirm string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "remove <name>",
 		Short: "Remove a device from the inventory",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+		Long: `Remove a device from the local inventory (and stored credentials).
 
+` + confirmLongHelp + `
+--force skips the interactive [y/N] prompt only.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := loadApp()
 			if err != nil {
+				return err
+			}
+
+			name, _, err := a.Inventory.Lookup(args[0])
+			if err != nil {
+				return err
+			}
+
+			if err := requireConfirmDevice(confirm, name); err != nil {
 				return err
 			}
 
@@ -272,7 +285,8 @@ func newDeviceRemoveCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&force, "force", false, "skip confirmation")
+	cmd.Flags().BoolVar(&force, "force", false, "skip interactive [y/N] prompt (still requires --confirm)")
+	registerConfirmFlag(cmd, &confirm)
 
 	return cmd
 }
@@ -306,11 +320,8 @@ func newDeviceListCmd() *cobra.Command {
 				})
 			}
 
-			meta := output.Meta{
-				Command: "device list",
-				Count:   len(dl),
-			}
-			return output.Render(cmd.OutOrStdout(), a.OutFormat, dl, meta)
+			meta := a.newMeta("", "device list", len(dl))
+			return output.Render(cmd.OutOrStdout(), a.OutFormat, dl, meta, a.renderOpts())
 		},
 	}
 }
@@ -452,12 +463,7 @@ func newDeviceGetCmd() *cobra.Command {
 			}
 
 			if a.OutFormat == output.FormatJSON {
-				return output.RenderRawJSON(cmd.OutOrStdout(), entry, output.Meta{
-					Device:    name,
-					Command:   "device get",
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Count:     1,
-				})
+				return a.renderRawJSON(cmd.OutOrStdout(), entry, a.newMeta(name, "device get", 1))
 			}
 
 			dl := deviceList{deviceEntry{
@@ -468,7 +474,7 @@ func newDeviceGetCmd() *cobra.Command {
 				Username: entry.Username,
 				TLS:      entry.TLS,
 			}}
-			_ = output.Render(cmd.OutOrStdout(), a.OutFormat, dl, output.Meta{Command: "device get", Count: 1})
+			_ = output.Render(cmd.OutOrStdout(), a.OutFormat, dl, a.newMeta(name, "device get", 1), a.renderOpts())
 			if entry.Tags != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "Tags:  %s\n", entry.Tags)
 			}

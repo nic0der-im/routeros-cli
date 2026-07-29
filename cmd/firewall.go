@@ -20,6 +20,7 @@ func newFirewallCmd() *cobra.Command {
 	cmd.AddCommand(
 		newFirewallFilterCmd(),
 		newFirewallNATCmd(),
+		newFirewallAddressListCmd(),
 	)
 	return cmd
 }
@@ -32,7 +33,12 @@ func newFirewallFilterCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "filter",
 		Short: "Manage firewall filter rules",
+		Long: `Manage /ip/firewall/filter rules.
+
+Mutations accept --id '*N' or --comment <exact> (exact match; refuse if ambiguous).
+Use --dry-run to preview after comment→.id resolution.`,
 	}
+	attachDryRunFlag(cmd)
 	cmd.AddCommand(
 		newFirewallFilterListCmd(),
 		newFirewallFilterAddCmd(),
@@ -115,84 +121,107 @@ func newFirewallFilterAddCmd() *cobra.Command {
 	return cmd
 }
 
+const firewallFilterPath = "/ip/firewall/filter"
+
 func newFirewallFilterRemoveCmd() *cobra.Command {
-	var force bool
+	var (
+		id      string
+		comment string
+		force   bool
+	)
 
 	cmd := &cobra.Command{
-		Use:   "remove <id>",
-		Short: "Remove a firewall filter rule",
-		Args:  cobra.ExactArgs(1),
+		Use:   "remove",
+		Short: "Remove a firewall filter rule by --id or --comment",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			id := args[0]
-
-			if !force {
-				fmt.Fprintf(os.Stderr, "Remove firewall rule %s? [y/N] ", id)
-				scanner := bufio.NewScanner(os.Stdin)
-				if scanner.Scan() {
-					if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
-						fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
-						return
+			if id == "" && len(args) == 1 {
+				id = args[0]
+			}
+			runWithClient(cmd, firewallFilterPath+"/remove", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				resolved, err := resolveMutateTargetID(ctx, c, firewallFilterPath, id, comment)
+				if err != nil {
+					return err
+				}
+				if !force && !isDryRun(cmd) {
+					fmt.Fprintf(os.Stderr, "Remove firewall rule %s? [y/N] ", resolved)
+					scanner := bufio.NewScanner(os.Stdin)
+					if scanner.Scan() {
+						if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+							fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+							return nil
+						}
 					}
 				}
-			}
-
-			runWithClient(cmd, "/ip/firewall/filter/remove", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				_, err := c.Run(ctx, "/ip/firewall/filter/remove", "=.id="+id)
-				if err != nil {
-					return fmt.Errorf("removing filter rule: %w", err)
-				}
-
-				fmt.Fprintf(cmd.OutOrStdout(), "Filter rule %s removed from %s\n", id, deviceName)
-				return nil
+				apiArgs := []string{"=.id=" + resolved}
+				return applyDeleteMutation(ctx, a, c, cmd, deviceName, firewallFilterPath, firewallFilterPath+"/remove", apiArgs, resolved)
 			})
 		},
 	}
 
+	cmd.Flags().StringVar(&id, "id", "", "RouterOS .id (alternative to --comment)")
+	cmd.Flags().StringVar(&comment, "comment", "", "exact rule comment (alternative to --id)")
 	cmd.Flags().BoolVar(&force, "force", false, "skip confirmation")
 
 	return cmd
 }
 
 func newFirewallFilterEnableCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "enable <id>",
-		Short: "Enable a disabled firewall filter rule",
-		Args:  cobra.ExactArgs(1),
+	var (
+		id      string
+		comment string
+	)
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "Enable a disabled firewall filter rule by --id or --comment",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			id := args[0]
-
-			runWithClient(cmd, "/ip/firewall/filter/set", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				_, err := c.Run(ctx, "/ip/firewall/filter/set", "=.id="+id, "=disabled=no")
+			if id == "" && len(args) == 1 {
+				id = args[0]
+			}
+			runWithClient(cmd, firewallFilterPath+"/enable", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				resolved, err := resolveMutateTargetID(ctx, c, firewallFilterPath, id, comment)
 				if err != nil {
-					return fmt.Errorf("enabling filter rule: %w", err)
+					return err
 				}
-
-				fmt.Fprintf(cmd.OutOrStdout(), "Filter rule %s enabled on %s\n", id, deviceName)
-				return nil
+				apiArgs := []string{"=.id=" + resolved}
+				return applyEnableDisableMutation(ctx, a, c, cmd, deviceName, firewallFilterPath,
+					firewallFilterPath+"/enable", apiArgs, resolved, "enable")
 			})
 		},
 	}
+	cmd.Flags().StringVar(&id, "id", "", "RouterOS .id (alternative to --comment)")
+	cmd.Flags().StringVar(&comment, "comment", "", "exact rule comment (alternative to --id)")
+	return cmd
 }
 
 func newFirewallFilterDisableCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "disable <id>",
-		Short: "Disable a firewall filter rule",
-		Args:  cobra.ExactArgs(1),
+	var (
+		id      string
+		comment string
+	)
+	cmd := &cobra.Command{
+		Use:   "disable",
+		Short: "Disable a firewall filter rule by --id or --comment",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			id := args[0]
-
-			runWithClient(cmd, "/ip/firewall/filter/set", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				_, err := c.Run(ctx, "/ip/firewall/filter/set", "=.id="+id, "=disabled=yes")
+			if id == "" && len(args) == 1 {
+				id = args[0]
+			}
+			runWithClient(cmd, firewallFilterPath+"/disable", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				resolved, err := resolveMutateTargetID(ctx, c, firewallFilterPath, id, comment)
 				if err != nil {
-					return fmt.Errorf("disabling filter rule: %w", err)
+					return err
 				}
-
-				fmt.Fprintf(cmd.OutOrStdout(), "Filter rule %s disabled on %s\n", id, deviceName)
-				return nil
+				apiArgs := []string{"=.id=" + resolved}
+				return applyEnableDisableMutation(ctx, a, c, cmd, deviceName, firewallFilterPath,
+					firewallFilterPath+"/disable", apiArgs, resolved, "disable")
 			})
 		},
 	}
+	cmd.Flags().StringVar(&id, "id", "", "RouterOS .id (alternative to --comment)")
+	cmd.Flags().StringVar(&comment, "comment", "", "exact rule comment (alternative to --id)")
+	return cmd
 }
 
 // ---------------------------------------------------------------------------

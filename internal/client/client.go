@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-routeros/routeros/v3"
+	"github.com/nic0der-im/routeros-cli/internal/apperr"
 )
 
 // defaultTimeout is applied when ConnectConfig.Timeout is zero.
@@ -48,7 +49,11 @@ type RouterOSClient struct {
 // true, a TLS connection is made with the provided TLS settings; otherwise a
 // plain-text connection is established. A default timeout of 10 seconds is
 // used when cfg.Timeout is zero.
-func Connect(ctx context.Context, cfg ConnectConfig) (*RouterOSClient, error) {
+//
+// The returned Client retries transient failures on read-only commands
+// (see WithReadRetries / ROS_READ_RETRIES). Mutating commands are never
+// auto-retried (ambiguous-write policy A5).
+func Connect(ctx context.Context, cfg ConnectConfig) (Client, error) {
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = defaultTimeout
@@ -76,7 +81,8 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*RouterOSClient, error) {
 		return nil, fmt.Errorf("connecting to %s: %w", cfg.Address, err)
 	}
 
-	return &RouterOSClient{conn: conn}, nil
+	ros := &RouterOSClient{conn: conn}
+	return WithReadRetries(ros, ReadRetryConfigFromEnv(cfg.Address)), nil
 }
 
 func buildTLSConfig(cfg ConnectConfig) (*tls.Config, error) {
@@ -119,7 +125,13 @@ func (c *RouterOSClient) Run(ctx context.Context, command string, args ...string
 
 	reply, err := c.conn.RunArgs(cmdArgs)
 	if err != nil {
-		return nil, fmt.Errorf("running %s: %w", command, err)
+		wrapped := fmt.Errorf("running %s: %w", command, err)
+		// Ambiguous-write policy: after a mutation is sent, timeout/EOF/reset
+		// must not be blindly retried (A5). Reads are left as plain errors.
+		if isMutatingCommand(command) {
+			return nil, apperr.MaybeAmbiguousWrite(wrapped)
+		}
+		return nil, wrapped
 	}
 
 	sentences := make([]map[string]string, 0, len(reply.Re)+1)
@@ -140,4 +152,16 @@ func (c *RouterOSClient) Run(ctx context.Context, command string, args ...string
 func (c *RouterOSClient) Close() error {
 	c.conn.Close() //nolint:errcheck // routeros.Client.Close is void
 	return nil
+}
+
+// isMutatingCommand reports whether command is a write-style RouterOS verb.
+// Kept local to avoid importing policy (policy → client).
+func isMutatingCommand(command string) bool {
+	lower := strings.ToLower(strings.TrimSpace(command))
+	for _, s := range []string{"/add", "/set", "/remove", "/enable", "/disable", "/move", "/reset", "/reboot", "/shutdown", "/save", "/load", "/import", "/restore", "/run", "/cancel", "/comment"} {
+		if strings.HasSuffix(lower, s) {
+			return true
+		}
+	}
+	return false
 }

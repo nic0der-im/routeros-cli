@@ -20,10 +20,17 @@ func newSetCmd() *cobra.Command {
   ros set /ip/cloud ddns-enabled=auto update-time=false
   ros set user .id=*2 password=secret
   ros set firewall/nat .id=*1 out-interface=ether1
+  ros set firewall/filter --comment allow-web disabled=yes
+  ros set firewall/mangle --comment mark-conn new-packet-mark=web
 
-Singleton menus (no .id) are journaled in safe sessions via a pre-/print snapshot.`,
+Singleton menus (no .id) are journaled in safe sessions via a pre-/print snapshot.
+For firewall/filter and firewall/mangle, --comment <exact> resolves to .id
+(refuse if 0 or many matches). Use positional comment=value to change the comment field.
+Use --dry-run to preview without writing (comment is resolved before preview).`,
 		Run: runGenericSet,
 	}
+	attachDryRunFlag(cmd)
+	attachCommentTargetFlag(cmd)
 	cmd.AddCommand(newSetIdentityCmd())
 	return cmd
 }
@@ -36,26 +43,37 @@ func newSetIdentityCmd() *cobra.Command {
 		Short: "Set system identity",
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/system/identity/set", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/system/identity/set"); err != nil {
+				rosCmd := "/system/identity/set"
+				apiArgs := []string{"=name=" + name}
+
+				preName := ""
+				pre := map[string]string{}
+				if res, err := c.Run(ctx, "/system/identity/print"); err == nil && len(res.Sentences) > 0 {
+					preName = res.Sentences[0]["name"]
+					pre["name"] = preName
+				}
+
+				if isDryRun(cmd) {
+					return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+						Verb: "set", Path: "/system/identity", Command: rosCmd, Args: apiArgs, Pre: pre,
+					})
+				}
+
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
 					return err
 				}
 
-				preName := ""
-				if res, err := c.Run(ctx, "/system/identity/print"); err == nil && len(res.Sentences) > 0 {
-					preName = res.Sentences[0]["name"]
-				}
-
-				_, err := c.Run(ctx, "/system/identity/set", "=name="+name)
+				_, err := c.Run(ctx, rosCmd, apiArgs...)
 				if err != nil {
 					return fmt.Errorf("setting identity: %w", err)
 				}
 
 				if preName != "" {
 					_ = a.recordSafeChange(deviceName, session.Change{
-						Command:  "/system/identity/set",
-						Args:     []string{"=name=" + name},
+						Command:  rosCmd,
+						Args:     apiArgs,
 						Inverse:  []string{"/system/identity/set", "=name=" + preName},
-						PreState: map[string]string{"name": preName},
+						PreState: pre,
 						Note:     "set identity",
 					})
 				}

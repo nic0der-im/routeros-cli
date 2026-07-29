@@ -353,3 +353,154 @@ func TestAddDeviceNilMap(t *testing.T) {
 		t.Error("device not added when starting from nil map")
 	}
 }
+
+func TestLoadEnvClassAndBlastRadiusFields(t *testing.T) {
+	path := tempConfigPath(t)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	content := []byte(`
+default_output = "table"
+
+[devices.edge]
+address = "10.0.0.1:8728"
+username = "admin"
+env_class = "prod"
+max_session_changes = 10
+allowed_write_paths = ["/ip/address", "/ip/firewall"]
+denied_write_paths = ["/system/script"]
+exec_allow = ["/interface/*", "/ip/address/*"]
+exec_deny = ["/tool/*"]
+require_backup_before_write = true
+
+[devices.lab]
+address = "192.168.88.1:8728"
+username = "admin"
+`)
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	edge := cfg.Devices["edge"]
+	if edge.EnvClass != "prod" {
+		t.Errorf("env_class: got %q", edge.EnvClass)
+	}
+	if edge.MaxSessionChanges != 10 {
+		t.Errorf("max_session_changes: got %d", edge.MaxSessionChanges)
+	}
+	if len(edge.AllowedWritePaths) != 2 || edge.AllowedWritePaths[0] != "/ip/address" {
+		t.Errorf("allowed_write_paths: %+v", edge.AllowedWritePaths)
+	}
+	if len(edge.DeniedWritePaths) != 1 || edge.DeniedWritePaths[0] != "/system/script" {
+		t.Errorf("denied_write_paths: %+v", edge.DeniedWritePaths)
+	}
+	if len(edge.ExecAllow) != 2 || edge.ExecAllow[0] != "/interface/*" {
+		t.Errorf("exec_allow: %+v", edge.ExecAllow)
+	}
+	if len(edge.ExecDeny) != 1 || edge.ExecDeny[0] != "/tool/*" {
+		t.Errorf("exec_deny: %+v", edge.ExecDeny)
+	}
+	if !edge.RequireBackupBeforeWrite {
+		t.Error("require_backup_before_write: want true")
+	}
+
+	lab := cfg.Devices["lab"]
+	if lab.EnvClass != "" {
+		t.Errorf("lab env_class should be empty, got %q", lab.EnvClass)
+	}
+	if lab.RequireBackupBeforeWrite {
+		t.Error("lab require_backup_before_write should default false")
+	}
+}
+
+func TestEffectiveEnvClass(t *testing.T) {
+	tests := []struct {
+		envClass string
+		strict   bool
+		want     string
+	}{
+		{"", false, EnvClassLab},
+		{"lab", false, EnvClassLab},
+		{"staging", false, EnvClassStaging},
+		{"prod", false, EnvClassProd},
+		{"production", false, EnvClassProd},
+		{"PROD", false, EnvClassProd},
+		{"lab", true, EnvClassProd},
+		{"", true, EnvClassProd},
+		{"unknown", false, EnvClassLab},
+	}
+	for _, tt := range tests {
+		got := EffectiveEnvClass(DeviceConfig{EnvClass: tt.envClass}, tt.strict)
+		if got != tt.want {
+			t.Errorf("EffectiveEnvClass(%q, strict=%v) = %q, want %q", tt.envClass, tt.strict, got, tt.want)
+		}
+	}
+}
+
+func TestEffectiveMaxSessionChanges(t *testing.T) {
+	if got := EffectiveMaxSessionChanges(DeviceConfig{}, EnvClassProd); got != DefaultMaxSessionChangesProd {
+		t.Errorf("prod default: got %d", got)
+	}
+	if got := EffectiveMaxSessionChanges(DeviceConfig{MaxSessionChanges: 5}, EnvClassProd); got != 5 {
+		t.Errorf("explicit: got %d", got)
+	}
+	if got := EffectiveMaxSessionChanges(DeviceConfig{}, EnvClassLab); got != 0 {
+		t.Errorf("lab unlimited: got %d", got)
+	}
+	if got := EffectiveMaxSessionChanges(DeviceConfig{}, EnvClassStaging); got != 0 {
+		t.Errorf("staging unlimited default: got %d", got)
+	}
+}
+
+func TestROSStrict(t *testing.T) {
+	t.Setenv("ROS_STRICT", "")
+	if ROSStrict() {
+		t.Fatal("expected false when unset")
+	}
+	t.Setenv("ROS_STRICT", "1")
+	if !ROSStrict() {
+		t.Fatal("expected true for ROS_STRICT=1")
+	}
+	t.Setenv("ROS_STRICT", "true")
+	if !ROSStrict() {
+		t.Fatal("expected true for ROS_STRICT=true")
+	}
+}
+
+func TestSaveLoadRoundtripGuardrailFields(t *testing.T) {
+	path := tempConfigPath(t)
+	original := &Config{
+		DefaultOutput: "table",
+		Devices: map[string]DeviceConfig{
+			"edge": {
+				Address:           "10.0.0.1:8728",
+				Username:          "admin",
+				EnvClass:          "prod",
+				MaxSessionChanges: 12,
+				AllowedWritePaths: []string{"/ip/address"},
+				DeniedWritePaths:  []string{"/system/script"},
+				ExecAllow:         []string{"/interface/*"},
+				ExecDeny:          []string{"/tool/*"},
+			},
+		},
+	}
+	if err := original.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := loaded.Devices["edge"]
+	want := original.Devices["edge"]
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("want %+v, got %+v", want, got)
+	}
+}

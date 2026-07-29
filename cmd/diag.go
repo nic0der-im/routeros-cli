@@ -24,16 +24,6 @@ func newDiagCmd() *cobra.Command {
 	return cmd
 }
 
-func newDiagLogCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "log",
-		Short: "Show recent system log entries",
-		Run: func(cmd *cobra.Command, args []string) {
-			runGenericGet(cmd, []string{"/log"}, nil)
-		},
-	}
-}
-
 func newDiagPingCmd() *cobra.Command {
 	var count int
 	cmd := &cobra.Command{
@@ -111,7 +101,7 @@ func newDiagBandwidthTestCmd() *cobra.Command {
 				"protocol=" + protocol,
 			})
 			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable(rosCmd); err != nil {
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
 					return err
 				}
 				result, err := c.Run(ctx, rosCmd, apiArgs...)

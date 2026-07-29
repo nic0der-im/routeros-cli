@@ -19,10 +19,18 @@ func newLeaseCmd() *cobra.Command {
 }
 
 func newLeaseCleanupWaitingCmd() *cobra.Command {
-	var dryRun bool
+	var (
+		dryRun  bool
+		confirm string
+	)
 	cmd := &cobra.Command{
 		Use:   "cleanup-waiting",
 		Short: "Remove DHCP leases stuck in status=waiting",
+		Long: `Remove DHCP leases stuck in status=waiting (may delete many rows).
+
+` + confirmLongHelp + `
+
+--dry-run lists matches without deleting and does not require --confirm.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/ip/dhcp-server/lease/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
 				result, err := c.Run(ctx, "/ip/dhcp-server/lease/print", "?status=waiting")
@@ -32,6 +40,11 @@ func newLeaseCleanupWaitingCmd() *cobra.Command {
 				if len(result.Sentences) == 0 {
 					fmt.Fprintln(cmd.OutOrStdout(), "No waiting leases")
 					return nil
+				}
+				if !dryRun {
+					if err := requireConfirmDevice(confirm, deviceName); err != nil {
+						return err
+					}
 				}
 				removed := 0
 				for _, s := range result.Sentences {
@@ -45,7 +58,7 @@ func newLeaseCleanupWaitingCmd() *cobra.Command {
 						continue
 					}
 					rosCmd := "/ip/dhcp-server/lease/remove"
-					if err := a.ensureWritable(rosCmd); err != nil {
+					if err := a.ensureWritable(deviceName, rosCmd); err != nil {
 						return err
 					}
 					pre := map[string]string{}
@@ -76,5 +89,6 @@ func newLeaseCleanupWaitingCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list waiting leases without deleting")
+	registerConfirmFlag(cmd, &confirm)
 	return cmd
 }

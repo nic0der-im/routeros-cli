@@ -20,6 +20,10 @@ Curated:
   ros get system info
   ros get firewall filter
   ros get dhcp lease
+  ros get wg peers [--stale-after 5m]
+  ros get wifi clients
+  ros get bgp sessions
+  ros get ospf neighbors
 
 Generic (any API path or alias from 'ros domains'):
   ros get /ip/firewall/filter
@@ -27,6 +31,8 @@ Generic (any API path or alias from 'ros domains'):
   ros get radius
   ros get interface/bridge
   ros get log
+  ros get wg/peers
+  ros get bgp/session
 
 Filters (--where works on curated and generic get):
   ros get interface --where name=ether1
@@ -42,8 +48,49 @@ Filters (--where works on curated and generic get):
 		newGetInterfaceCmd(),
 		newGetIPCmd(),
 		newGetFirewallCmd(),
+		newGetDNSCmd(),
 		newGetDHCPCmd(),
+		newGetWGCmd(),
+		newGetWifiCmd(),
+		newGetBGPCmd(),
+		newGetOSPFCmd(),
 	)
+	return cmd
+}
+
+func newGetWGCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wg",
+		Short: "Get WireGuard peers",
+	}
+	cmd.AddCommand(newWGPeersCmd())
+	return cmd
+}
+
+func newGetWifiCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wifi",
+		Short: "Get WiFi clients / registration",
+	}
+	cmd.AddCommand(newWifiClientsCmd())
+	return cmd
+}
+
+func newGetBGPCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "bgp",
+		Short: "Get BGP sessions",
+	}
+	cmd.AddCommand(newBGPSessionsCmd())
+	return cmd
+}
+
+func newGetOSPFCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ospf",
+		Short: "Get OSPF neighbors",
+	}
+	cmd.AddCommand(newOSPFNeighborsCmd())
 	return cmd
 }
 
@@ -220,6 +267,42 @@ func newGetFirewallCmd() *cobra.Command {
 						return fmt.Errorf("mapping NAT rules: %w", err)
 					}
 					return a.render(cmd.OutOrStdout(), rosapi.FirewallRules(rules), deviceName, "/ip/firewall/nat/print")
+				})
+			},
+		},
+		&cobra.Command{
+			Use:   "address-list",
+			Short: "List firewall address-list entries",
+			Run: func(cmd *cobra.Command, args []string) {
+				runWithClient(cmd, addressListPath+"/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+					result, err := runPrint(ctx, c, addressListPath+"/print", cmd)
+					if err != nil {
+						return fmt.Errorf("fetching address-list: %w", err)
+					}
+					return renderGenericResult(a, cmd.OutOrStdout(), result, deviceName, addressListPath+"/print")
+				})
+			},
+		},
+	)
+	return cmd
+}
+
+func newGetDNSCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dns",
+		Short: "Get DNS static entries",
+	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "static",
+			Short: "List DNS static entries",
+			Run: func(cmd *cobra.Command, args []string) {
+				runWithClient(cmd, dnsStaticPath+"/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+					result, err := runPrint(ctx, c, dnsStaticPath+"/print", cmd)
+					if err != nil {
+						return fmt.Errorf("fetching DNS static: %w", err)
+					}
+					return renderGenericResult(a, cmd.OutOrStdout(), result, deviceName, dnsStaticPath+"/print")
 				})
 			},
 		},

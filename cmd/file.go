@@ -21,7 +21,7 @@ func newFileCmd() *cobra.Command {
 
   ros file list
   ros file get <name> [--output ./local]
-  ros file remove <name-or-id>`,
+  ros file remove <name-or-id> --confirm DEV`,
 	}
 	cmd.AddCommand(
 		newFileListCmd(),
@@ -110,13 +110,17 @@ merge into /ip/service ssh address, SFTP the file, restore previous SSH state.`,
 }
 
 func newFileRemoveCmd() *cobra.Command {
-	return &cobra.Command{
+	var confirm string
+
+	cmd := &cobra.Command{
 		Use:   "remove <name-or-id>",
 		Short: "Remove a file on the router (/file/remove)",
 		Long: `Remove a RouterOS file by name or .id.
 
-  ros file remove stale.backup
-  ros file remove '*A'
+  ros file remove stale.backup --confirm DEV
+  ros file remove '*A' --confirm DEV
+
+` + confirmLongHelp + `
 
 Names use =numbers=<name> (same as backup cleanup). Values that look like
 RouterOS ids (start with *) use =.id=.`,
@@ -124,7 +128,10 @@ RouterOS ids (start with *) use =.id=.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			target := args[0]
 			runWithClient(cmd, "/file/remove", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/file/remove"); err != nil {
+				if err := requireConfirmDevice(confirm, deviceName); err != nil {
+					return err
+				}
+				if err := a.ensureWritable(deviceName, "/file/remove"); err != nil {
 					return err
 				}
 				apiArg := fileRemoveArg(target)
@@ -137,6 +144,8 @@ RouterOS ids (start with *) use =.id=.`,
 			})
 		},
 	}
+	registerConfirmFlag(cmd, &confirm)
+	return cmd
 }
 
 // fileRemoveArg builds the RouterOS /file/remove argument for a name or .id.

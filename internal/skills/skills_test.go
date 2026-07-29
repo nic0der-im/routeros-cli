@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,21 @@ func TestInstallUninstall(t *testing.T) {
 	if _, err := os.Stat(skillFile); err != nil {
 		t.Fatalf("missing skill: %v", err)
 	}
+	for _, rel := range []string{
+		filepath.Join("ros", "references", "commands.md"),
+		filepath.Join("ros", "references", "agents.md"),
+		filepath.Join("ros", "references", "safety-and-recovery.md"),
+		filepath.Join("ros", "references", "routeros-docs.md"),
+		filepath.Join("ros-safe-apply", "references", "commands.md"),
+		filepath.Join("ros-safe-apply", "references", "agents.md"),
+		filepath.Join("ros-safe-apply", "references", "safety-and-recovery.md"),
+		filepath.Join("ros-safe-apply", "references", "routeros-docs.md"),
+	} {
+		p := filepath.Join(root, ".cursor", "skills", rel)
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("missing installed reference %s: %v", rel, err)
+		}
+	}
 
 	results, err = Install(InstallOptions{
 		Agent:   AgentCursor,
@@ -75,5 +91,25 @@ func TestInstallUninstall(t *testing.T) {
 func TestListPacks(t *testing.T) {
 	if len(ListPacks()) < 2 {
 		t.Fatal("expected packs")
+	}
+}
+
+func TestEmbeddedPackReferences(t *testing.T) {
+	required := []string{
+		"packs/ros/SKILL.md",
+		"packs/ros/references/commands.md",
+		"packs/ros/references/agents.md",
+		"packs/ros/references/safety-and-recovery.md",
+		"packs/ros/references/routeros-docs.md",
+		"packs/ros-safe-apply/SKILL.md",
+		"packs/ros-safe-apply/references/commands.md",
+		"packs/ros-safe-apply/references/agents.md",
+		"packs/ros-safe-apply/references/safety-and-recovery.md",
+		"packs/ros-safe-apply/references/routeros-docs.md",
+	}
+	for _, path := range required {
+		if _, err := fs.Stat(packsFS, path); err != nil {
+			t.Fatalf("missing embedded %s: %v", path, err)
+		}
 	}
 }

@@ -4,7 +4,7 @@ description: "Trigger: ros, routeros-cli, MikroTik, RouterOS, audit router, devi
 license: MIT
 metadata:
   author: nic0der-im
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 ## Activation Contract
@@ -32,13 +32,17 @@ Load when the user asks to inspect, audit, optimize, or query MikroTik RouterOS 
 | Network-only view | `audit --profile network` |
 | Security-only view | `audit --profile security` |
 | Hygiene / optimize pass | `audit --profile hygiene` or `doctor` (then checklist below); use `full` for broader snapshot |
-| Quick FINDINGS pass | `ros -d DEV --read-only doctor` (alias of hygiene audit + FINDINGS footer) |
+| Quick FINDINGS pass (before writes) | `ros -d DEV --read-only doctor` (hygiene + FINDINGS; prod write gate) |
+| Router log slice | `ros -d DEV --read-only diag log --topics … --since …` |
+| Reachability / L2 / path | `diag ping`, `diag neighbors`, `diag traceroute` when relevant |
+| Stale WG / down hosts / DNS clutter | `wg peers --stale-after`, `get netwatch`, `get dns/static` (also in FINDINGS) |
 | Low-RAM board (e.g. RB2011 64MB) | add `--skip-cpu-profile` while iterating |
 | Include PPPoE/PPP ifaces in human audit | `--show-ppp` |
 | Targeted read | `ros -d DEV --read-only get <domain\|/path> -o json` (base path only) |
 | DHCP / firewall / users / radius | `get dhcp/lease`, `get firewall/filter`, `get user`, `get radius` |
 | On-router files | `ros -d DEV --read-only file list` |
 | Escape hatch | `ros -d DEV --read-only exec /path/print` |
+| Write/session failure recovery | See `references/safety-and-recovery.md` (then hand off to `ros-safe-apply`) |
 
 ## Optimization / hygiene checklist (after audit)
 
@@ -73,3 +77,5 @@ Compact lab flow: audit (with `--skip-cpu-profile` on small boards) → checklis
 
 - `references/commands.md`
 - `references/agents.md`
+- `references/safety-and-recovery.md` — exit situations → next step; recovery spine; break-glass
+- `references/routeros-docs.md` — official MikroTik help pointers (API vs REST; topic entry points)

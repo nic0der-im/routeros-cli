@@ -228,8 +228,8 @@ func runWinboxImport(cmd *cobra.Command, file string, withPasswords, dryRun, for
 		}
 	}
 
-	meta := output.Meta{Command: "device import", Count: len(rows)}
-	if err := output.Render(cmd.OutOrStdout(), a.OutFormat, rows, meta); err != nil {
+	meta := a.newMeta("", "device import", len(rows))
+	if err := output.Render(cmd.OutOrStdout(), a.OutFormat, rows, meta, a.renderOpts()); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Import from %s: added=%d updated=%d skipped=%d (dry-run=%v with-passwords=%v api-port=%s)\n",

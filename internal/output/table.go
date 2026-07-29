@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -10,8 +11,15 @@ import (
 // RenderTable writes data as a human-readable table using text/tabwriter.
 // Headers are printed in ALL CAPS. Columns are tab-separated with minwidth=0,
 // tabwidth=4, and padding=2. Known secret columns are always redacted.
-func RenderTable(w io.Writer, data Renderable) error {
-	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+// When MaxBytes is exceeded, output is hard-truncated with [OUTPUT TRUNCATED].
+func RenderTable(w io.Writer, data Renderable, opts ...Options) error {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0)
 
 	headers := data.TableHeaders()
 	upper := make([]string, len(headers))
@@ -36,5 +44,10 @@ func RenderTable(w io.Writer, data Renderable) error {
 		}
 	}
 
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+
+	_, err := writeCapped(w, buf.Bytes(), effectiveMaxBytes(o))
+	return err
 }

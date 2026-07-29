@@ -20,12 +20,20 @@ ros device test
 ros device import --from winbox [--dry-run] [--with-passwords]
 ```
 
-## Agent read path
+## Agent read path / diagnose
 
 ```sh
 export ROS_READ_ONLY=1 ROS_DEFAULT_OUTPUT=json
+ros -d DEV doctor                        # FINDINGS before writes (prod freshness)
 ros -d DEV audit --profile full          # also: network|security|hygiene
 ros -d DEV audit --skip-cpu-profile --show-ppp
+ros -d DEV diag log --topics firewall,error --since 15m
+ros -d DEV diag ping 1.1.1.1 --count 4
+ros -d DEV diag neighbors
+ros -d DEV diag traceroute 8.8.8.8
+ros -d DEV wg peers --stale-after 15m
+ros -d DEV get netwatch
+ros -d DEV get dns/static
 ros -d DEV get firewall/filter
 ros -d DEV get user
 ros -d DEV file list
@@ -35,6 +43,7 @@ ros -d DEV file list
 
 ```sh
 unset ROS_READ_ONLY
+ros -d DEV doctor                        # prod doctor gate
 ros -d DEV session begin --safe
 # WAN-facing / risky: ros -d DEV session watch   # other terminal
 ros -d DEV create firewall/filter chain=forward action=accept ...
@@ -49,4 +58,6 @@ Prefer `set` (journaled) over `exec …/set` for singleton menus like `/ip/cloud
 Confirm with the user before disabling management services (`api-ssl`, www, …).  
 `backup binary` default remote name: UTC `ros-backup-YYYYMMDD-HHMMSS`.
 
-Exit codes: 0 OK · 1 cmd · 2 conn · 3 config · 4 read-only violation
+Exit codes: 0 OK · 1 cmd · 2 conn · 3 config · 4 read-only violation  
+
+Recovery: `references/safety-and-recovery.md` (pointer to full map in `ros` pack)

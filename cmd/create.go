@@ -16,13 +16,19 @@ func newCreateCmd() *cobra.Command {
 
   ros create ip address --address 10.0.0.1/24 --interface bridge
   ros create firewall filter --chain forward --action accept
+  ros create firewall address-list --list blacklist --address 1.2.3.4
+  ros create dns static --name router.lan --address 192.168.88.1
   ros create /ip/firewall/address-list list=blacklist address=1.2.3.4
-  ros create user name=tech group=read password=...`,
+  ros create user name=tech group=read password=...
+
+Use --dry-run to preview without writing.`,
 		Run: runGenericCreate,
 	}
+	attachDryRunFlag(cmd)
 	cmd.AddCommand(
 		newCreateIPCmd(),
 		newCreateFirewallCmd(),
+		newCreateDNSCmd(),
 	)
 	return cmd
 }
@@ -51,10 +57,7 @@ func newCreateIPAddressCmd() *cobra.Command {
 		Short: "Create an IP address",
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/ip/address/add", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/ip/address/add"); err != nil {
-					return err
-				}
-
+				rosCmd := "/ip/address/add"
 				rosArgs := []string{
 					"=address=" + address,
 					"=interface=" + iface,
@@ -62,13 +65,21 @@ func newCreateIPAddressCmd() *cobra.Command {
 				if comment != "" {
 					rosArgs = append(rosArgs, "=comment="+comment)
 				}
+				if isDryRun(cmd) {
+					return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+						Verb: "create", Path: "/ip/address", Command: rosCmd, Args: rosArgs,
+					})
+				}
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+					return err
+				}
 
-				result, err := c.Run(ctx, "/ip/address/add", rosArgs...)
+				result, err := c.Run(ctx, rosCmd, rosArgs...)
 				if err != nil {
 					return fmt.Errorf("creating IP address: %w", err)
 				}
 
-				if err := recordCreateChange(a, deviceName, "/ip/address/add", rosArgs, result); err != nil {
+				if err := recordCreateChange(a, deviceName, rosCmd, rosArgs, result); err != nil {
 					return err
 				}
 
@@ -104,10 +115,7 @@ func newCreateIPRouteCmd() *cobra.Command {
 		Short: "Create an IP route",
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/ip/route/add", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/ip/route/add"); err != nil {
-					return err
-				}
-
+				rosCmd := "/ip/route/add"
 				rosArgs := []string{
 					"=dst-address=" + dstAddress,
 					"=gateway=" + gateway,
@@ -118,13 +126,21 @@ func newCreateIPRouteCmd() *cobra.Command {
 				if comment != "" {
 					rosArgs = append(rosArgs, "=comment="+comment)
 				}
+				if isDryRun(cmd) {
+					return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+						Verb: "create", Path: "/ip/route", Command: rosCmd, Args: rosArgs,
+					})
+				}
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+					return err
+				}
 
-				result, err := c.Run(ctx, "/ip/route/add", rosArgs...)
+				result, err := c.Run(ctx, rosCmd, rosArgs...)
 				if err != nil {
 					return fmt.Errorf("creating IP route: %w", err)
 				}
 
-				if err := recordCreateChange(a, deviceName, "/ip/route/add", rosArgs, result); err != nil {
+				if err := recordCreateChange(a, deviceName, rosCmd, rosArgs, result); err != nil {
 					return err
 				}
 
@@ -146,9 +162,92 @@ func newCreateIPRouteCmd() *cobra.Command {
 func newCreateFirewallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "firewall",
-		Short: "Create firewall filter or nat rules",
+		Short: "Create firewall filter or address-list entries",
 	}
-	cmd.AddCommand(newCreateFirewallFilterCmd())
+	cmd.AddCommand(
+		newCreateFirewallFilterCmd(),
+		newCreateFirewallAddressListCmd(),
+	)
+	return cmd
+}
+
+func newCreateFirewallAddressListCmd() *cobra.Command {
+	var (
+		listName string
+		address  string
+		comment  string
+		timeout  string
+	)
+	cmd := &cobra.Command{
+		Use:   "address-list",
+		Short: "Create a firewall address-list entry (idempotent on list+address)",
+		Run: func(cmd *cobra.Command, args []string) {
+			rosCmd := addressListPath + "/add"
+			apiArgs := []string{"=list=" + listName, "=address=" + address}
+			if comment != "" {
+				apiArgs = append(apiArgs, "=comment="+comment)
+			}
+			if timeout != "" {
+				apiArgs = append(apiArgs, "=timeout="+timeout)
+			}
+			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				return applyCreateMutation(ctx, a, c, cmd, deviceName, addressListPath, rosCmd, apiArgs)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&listName, "list", "", "address-list name")
+	cmd.Flags().StringVar(&address, "address", "", "IP address or CIDR")
+	cmd.Flags().StringVar(&comment, "comment", "", "optional comment")
+	cmd.Flags().StringVar(&timeout, "timeout", "", "optional entry timeout")
+	_ = cmd.MarkFlagRequired("list")
+	_ = cmd.MarkFlagRequired("address")
+	return cmd
+}
+
+func newCreateDNSCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dns",
+		Short: "Create DNS static entries",
+	}
+	cmd.AddCommand(newCreateDNSStaticCmd())
+	return cmd
+}
+
+func newCreateDNSStaticCmd() *cobra.Command {
+	var (
+		name    string
+		address string
+		typ     string
+		comment string
+		ttl     string
+	)
+	cmd := &cobra.Command{
+		Use:   "static",
+		Short: "Create a DNS static entry (idempotent on name+type)",
+		Run: func(cmd *cobra.Command, args []string) {
+			rosCmd := dnsStaticPath + "/add"
+			apiArgs := []string{"=name=" + name, "=address=" + address}
+			if typ != "" {
+				apiArgs = append(apiArgs, "=type="+typ)
+			}
+			if comment != "" {
+				apiArgs = append(apiArgs, "=comment="+comment)
+			}
+			if ttl != "" {
+				apiArgs = append(apiArgs, "=ttl="+ttl)
+			}
+			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				return applyCreateMutation(ctx, a, c, cmd, deviceName, dnsStaticPath, rosCmd, apiArgs)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "DNS name")
+	cmd.Flags().StringVar(&address, "address", "", "IP address (A/AAAA)")
+	cmd.Flags().StringVar(&typ, "type", "", "record type (default A)")
+	cmd.Flags().StringVar(&comment, "comment", "", "optional comment")
+	cmd.Flags().StringVar(&ttl, "ttl", "", "optional TTL")
+	_ = cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("address")
 	return cmd
 }
 
@@ -168,10 +267,7 @@ func newCreateFirewallFilterCmd() *cobra.Command {
 		Short: "Create a firewall filter rule",
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/ip/firewall/filter/add", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable("/ip/firewall/filter/add"); err != nil {
-					return err
-				}
-
+				rosCmd := "/ip/firewall/filter/add"
 				rosArgs := buildFirewallArgs(cmd, map[string]string{
 					"chain":       chain,
 					"action":      action,
@@ -181,13 +277,21 @@ func newCreateFirewallFilterCmd() *cobra.Command {
 					"dst-port":    dstPort,
 					"comment":     comment,
 				})
+				if isDryRun(cmd) {
+					return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
+						Verb: "create", Path: "/ip/firewall/filter", Command: rosCmd, Args: rosArgs,
+					})
+				}
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
+					return err
+				}
 
-				result, err := c.Run(ctx, "/ip/firewall/filter/add", rosArgs...)
+				result, err := c.Run(ctx, rosCmd, rosArgs...)
 				if err != nil {
 					return fmt.Errorf("creating filter rule: %w", err)
 				}
 
-				if err := recordCreateChange(a, deviceName, "/ip/firewall/filter/add", rosArgs, result); err != nil {
+				if err := recordCreateChange(a, deviceName, rosCmd, rosArgs, result); err != nil {
 					return err
 				}
 

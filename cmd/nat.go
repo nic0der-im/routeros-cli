@@ -29,7 +29,7 @@ func newNatSetOutInterfaceCmd() *cobra.Command {
 			rosCmd := "/ip/firewall/nat/set"
 			apiArgs := []string{"=.id=" + id, "=out-interface=" + iface}
 			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				if err := a.ensureWritable(rosCmd); err != nil {
+				if err := a.ensureWritable(deviceName, rosCmd); err != nil {
 					return err
 				}
 				pre, _ := fetchPreState(ctx, c, "/ip/firewall/nat", id)

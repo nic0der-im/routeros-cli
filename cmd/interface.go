@@ -22,7 +22,17 @@ func newInterfaceCmd() *cobra.Command {
 		newInterfaceEnableCmd(),
 		newInterfaceDisableCmd(),
 		newInterfaceMonitorCmd(),
+		newInterfaceWireguardCmd(),
 	)
+	return cmd
+}
+
+func newInterfaceWireguardCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wireguard",
+		Short: "WireGuard interface helpers",
+	}
+	cmd.AddCommand(newWGPeersCmd())
 	return cmd
 }
 

@@ -16,6 +16,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// FINDINGS thresholds for optional hygiene/full sections (B6).
+const (
+	auditWGStaleAfter     = 15 * time.Minute
+	auditWGStaleLabel     = "15m"
+	dnsStaticHighCount    = 50
+	dnsStaticManyDisabled = 5
+)
+
 func newAuditCmd() *cobra.Command {
 	var profile string
 	var showPPP bool
@@ -32,8 +40,8 @@ Profiles:
   network  interfaces, IP addresses, routes, DNS, DHCP
   security firewall, users, IP services, identity
   hygiene  cloud DDNS, on-router .backup clutter, iface drop counters,
-           FastTrack flags, services leftovers, DHCP lease hygiene
-           (skips /tool/profile by default)
+           FastTrack flags, services leftovers, DHCP lease hygiene,
+           WireGuard peers, netwatch, DNS static (skips /tool/profile)
 
 Human output is a compact summary (highlights only). PPPoE/PPP/L2TP dynamic
 interfaces and their addresses are omitted by default (ISP-scale friendly);
@@ -49,15 +57,14 @@ Use --skip-cpu-profile to skip that sample. Use -o json for full raw maps.`,
 					return err
 				}
 
-				meta := output.Meta{
-					Device:    deviceName,
-					Command:   "audit --profile " + profile,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Count:     len(sections),
+				if profile == "hygiene" {
+					recordDoctorSuccess(deviceName, cmd.ErrOrStderr())
 				}
 
+				meta := a.newMeta(deviceName, "audit --profile "+profile, len(sections))
+
 				if a.OutFormat == output.FormatJSON {
-					return output.RenderRawJSON(cmd.OutOrStdout(), sections, meta, output.Options{Raw: a.RawJSON})
+					return a.renderRawJSON(cmd.OutOrStdout(), sections, meta)
 				}
 
 				return renderAuditHuman(cmd.OutOrStdout(), deviceName, profile, order, sections, showPPP)
@@ -169,6 +176,21 @@ func collectAudit(ctx context.Context, c client.Client, profile string, cpuProfi
 		}
 	}
 
+	// Optional cheap FINDINGS inputs for hygiene/full (soft-skip if path/package missing).
+	switch profile {
+	case "hygiene", "full", "":
+		for _, s := range []sectionSpec{
+			{"wireguard_peers", "/interface/wireguard/peers/print"},
+			{"netwatch", "/tool/netwatch/print"},
+			{"dns_static", "/ip/dns/static/print"},
+		} {
+			if result, err := c.Run(ctx, s.cmd); err == nil {
+				order = append(order, s.key)
+				out[s.key] = result.Sentences
+			}
+		}
+	}
+
 	// Short CPU profile sample for top processes (no per-process RAM on RouterOS API).
 	// Hygiene always skips /tool/profile (faster; low-RAM boards).
 	if cpuProfile && (profile == "full" || profile == "" || profile == "security") {
@@ -249,6 +271,12 @@ func renderAuditHuman(w io.Writer, deviceName, profile string, order []string, s
 			} else {
 				printSection(w, "services", "enabled only", summarizeServices(rows), width)
 			}
+		case "wireguard_peers":
+			printSection(w, "wireguard peers", "stale after "+auditWGStaleLabel, summarizeWGPeersAudit(rows), width)
+		case "netwatch":
+			printSection(w, "netwatch", "", summarizeNetwatchAudit(rows), width)
+		case "dns_static":
+			printSection(w, "dns static", "clutter heuristics", summarizeDNSStaticAudit(rows), width)
 		default:
 			printSection(w, name, fmt.Sprintf("%d item(s)", len(rows)), nil, width)
 		}
@@ -353,7 +381,154 @@ func deriveFindings(sections map[string]interface{}) []string {
 		}
 	}
 
+	if _, hasWG := sections["wireguard_peers"]; hasWG {
+		n := countStaleWGPeers(asRows(sections["wireguard_peers"]), auditWGStaleAfter, time.Now())
+		if n > 0 {
+			out = append(out, fmt.Sprintf(
+				"warn: %d WireGuard peer(s) stale (>%s/never) — inspect: wg peers --stale-after %s",
+				n, auditWGStaleLabel, auditWGStaleLabel,
+			))
+		} else {
+			out = append(out, fmt.Sprintf("ok: no WireGuard peers stale after %s", auditWGStaleLabel))
+		}
+	}
+
+	if _, hasNW := sections["netwatch"]; hasNW {
+		n := countNetwatchDown(asRows(sections["netwatch"]))
+		if n > 0 {
+			out = append(out, fmt.Sprintf("warn: %d netwatch host(s) down — inspect: get netwatch", n))
+		} else {
+			out = append(out, "ok: netwatch all up")
+		}
+	}
+
+	if _, hasDNS := sections["dns_static"]; hasDNS {
+		out = append(out, dnsStaticClutterFindings(asRows(sections["dns_static"]))...)
+	}
+
 	return out
+}
+
+// countStaleWGPeers counts enabled peers with empty/never/unparseable last-handshake
+// or age older than staleAfter (reuses parseLastHandshakeAge / isHandshakeStale).
+func countStaleWGPeers(rows []map[string]string, staleAfter time.Duration, now time.Time) int {
+	n := 0
+	for _, r := range rows {
+		if isTrue(r, "disabled") {
+			continue
+		}
+		hs := firstField(r, "last-handshake")
+		if isHandshakeStale(hs, staleAfter, now) {
+			n++
+		}
+	}
+	return n
+}
+
+// isNetwatchDown reports host-down style status for common RouterOS field names.
+// Disabled probes are ignored (intentional pause).
+func isNetwatchDown(row map[string]string) bool {
+	if isTrue(row, "disabled") {
+		return false
+	}
+	status := strings.ToLower(firstField(row, "status", "host-status", "state"))
+	if status != "" {
+		switch status {
+		case "down", "host-down", "unreachable", "timeout", "fail", "failed":
+			return true
+		}
+		if strings.Contains(status, "down") {
+			return true
+		}
+		return false
+	}
+	up := strings.ToLower(val(row, "up"))
+	return up == "false" || up == "no"
+}
+
+func countNetwatchDown(rows []map[string]string) int {
+	n := 0
+	for _, r := range rows {
+		if isNetwatchDown(r) {
+			n++
+		}
+	}
+	return n
+}
+
+// dnsStaticClutterFindings applies a simple clutter heuristic:
+//   - total entries > dnsStaticHighCount, or
+//   - disabled entries >= dnsStaticManyDisabled, or
+//   - duplicate name+type keys (type defaults to A, same as SemanticKey)
+// Emits one warn per triggered condition; otherwise a single ok line.
+func dnsStaticClutterFindings(rows []map[string]string) []string {
+	total := len(rows)
+	disabled := 0
+	keyCount := map[string]int{}
+	for _, r := range rows {
+		if isTrue(r, "disabled") {
+			disabled++
+		}
+		name := strings.ToLower(val(r, "name"))
+		if name == "" {
+			continue
+		}
+		typ := strings.ToUpper(val(r, "type"))
+		if typ == "" {
+			typ = "A"
+		}
+		keyCount[name+"|"+typ]++
+	}
+	dups := 0
+	for _, n := range keyCount {
+		if n >= 2 {
+			dups++
+		}
+	}
+
+	var out []string
+	if total > dnsStaticHighCount {
+		out = append(out, fmt.Sprintf(
+			"warn: %d DNS static entries (>%d) — review: dns static list",
+			total, dnsStaticHighCount,
+		))
+	}
+	if disabled >= dnsStaticManyDisabled {
+		out = append(out, fmt.Sprintf(
+			"warn: %d disabled DNS static — remove or enable: dns static list",
+			disabled,
+		))
+	}
+	if dups > 0 {
+		out = append(out, fmt.Sprintf(
+			"warn: %d duplicate DNS static name+type — resolve: dns static list",
+			dups,
+		))
+	}
+	if len(out) == 0 {
+		return []string{"ok: DNS static tidy"}
+	}
+	return out
+}
+
+func summarizeWGPeersAudit(rows []map[string]string) []string {
+	stale := countStaleWGPeers(rows, auditWGStaleAfter, time.Now())
+	return []string{fmt.Sprintf("%d peer(s) · %d stale after %s", len(rows), stale, auditWGStaleLabel)}
+}
+
+func summarizeNetwatchAudit(rows []map[string]string) []string {
+	down := countNetwatchDown(rows)
+	return []string{fmt.Sprintf("%d probe(s) · %d down", len(rows), down)}
+}
+
+func summarizeDNSStaticAudit(rows []map[string]string) []string {
+	disabled := 0
+	for _, r := range rows {
+		if isTrue(r, "disabled") {
+			disabled++
+		}
+	}
+	return []string{fmt.Sprintf("%d entr(y/ies) · %d disabled", len(rows), disabled)}
 }
 
 func countBackupFiles(rows []map[string]string) int {

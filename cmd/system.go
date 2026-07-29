@@ -131,23 +131,35 @@ func newSystemResourceCmd() *cobra.Command {
 }
 
 func newSystemRebootCmd() *cobra.Command {
-	var force bool
+	var (
+		force   bool
+		confirm string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "reboot",
 		Short: "Reboot the router",
-		Run: func(cmd *cobra.Command, args []string) {
-			if !force {
-				fmt.Fprint(os.Stderr, "Reboot device? [y/N] ")
-				var answer string
-				_, _ = fmt.Scanln(&answer)
-				if answer != "y" && answer != "Y" {
-					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
-					return
-				}
-			}
+		Long: `Reboot the router.
 
+` + confirmLongHelp + `
+--force skips the interactive [y/N] prompt only.`,
+		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/system/reboot", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				if err := requireConfirmDevice(confirm, deviceName); err != nil {
+					return err
+				}
+				if !force {
+					fmt.Fprintf(os.Stderr, "Reboot %q? [y/N] ", deviceName)
+					var answer string
+					_, _ = fmt.Scanln(&answer)
+					if answer != "y" && answer != "Y" {
+						fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+						return nil
+					}
+				}
+				if err := a.ensureWritableForce(deviceName, "/system/reboot", force); err != nil {
+					return err
+				}
 				_, err := c.Run(ctx, "/system/reboot")
 				if err != nil {
 					return fmt.Errorf("rebooting: %w", err)
@@ -158,7 +170,8 @@ func newSystemRebootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&force, "force", false, "skip confirmation")
+	cmd.Flags().BoolVar(&force, "force", false, "skip interactive [y/N] prompt (still requires --confirm)")
+	registerConfirmFlag(cmd, &confirm)
 
 	return cmd
 }

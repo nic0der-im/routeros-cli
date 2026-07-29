@@ -7,13 +7,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
+// Environment class constants for DeviceConfig.EnvClass.
 const (
-	appName     = "ros"
-	legacyApp   = "routeros-cli"
+	EnvClassLab     = "lab"
+	EnvClassStaging = "staging"
+	EnvClassProd    = "prod"
+
+	// DefaultMaxSessionChangesProd is used when MaxSessionChanges is 0 on prod.
+	DefaultMaxSessionChangesProd = 25
+)
+
+const (
+	appName   = "ros"
+	legacyApp = "routeros-cli"
 )
 
 // Config is the top-level configuration for ros.
@@ -32,6 +43,73 @@ type DeviceConfig struct {
 	ID       string   `toml:"id,omitempty"`
 	Tags     []string `toml:"tags,omitempty"`
 	Notes    string   `toml:"notes,omitempty"`
+
+	// EnvClass is prod|staging|lab. Empty defaults to lab via EffectiveEnvClass.
+	EnvClass string `toml:"env_class,omitempty"`
+
+	// MaxSessionChanges caps journaled writes per safe session.
+	// Zero means unlimited, except prod which defaults to DefaultMaxSessionChangesProd.
+	MaxSessionChanges int `toml:"max_session_changes,omitempty"`
+
+	// AllowedWritePaths, when non-empty, restricts writes to matching path prefixes.
+	AllowedWritePaths []string `toml:"allowed_write_paths,omitempty"`
+	// DeniedWritePaths adds device-specific denied path prefixes (builtins always apply).
+	DeniedWritePaths []string `toml:"denied_write_paths,omitempty"`
+
+	// RequireBackupBeforeWrite forces a local text export before session begin --safe,
+	// even for staging/lab. Prod always requires backup (see guardrails).
+	RequireBackupBeforeWrite bool `toml:"require_backup_before_write,omitempty"`
+
+	// ExecAllow, when non-empty, restricts ros exec to matching command globs (after denies).
+	ExecAllow []string `toml:"exec_allow,omitempty"`
+	// ExecDeny adds device-specific denied exec command globs (builtins always apply).
+	ExecDeny []string `toml:"exec_deny,omitempty"`
+
+	// MaintenanceWindows, when non-empty, restricts real writes to those windows
+	// (local timezone of the machine running ros for weekly forms). Empty = no restriction.
+	// Supported specs (see docs/COMMANDS.md):
+	//   "Mon-Fri 22:00-06:00"              — weekday range + HH:MM-HH:MM (overnight OK)
+	//   "weekday=sat,sun;start=00:00;end=23:59" — explicit keys
+	//   "2026-07-29T22:00:00-03:00/2026-07-30T06:00:00-03:00" — one-shot RFC3339 range
+	// Bypass: command --force, --skip-doctor-gate / App.Force, or ROS_SKIP_MAINTENANCE_GATE=1.
+	// Dry-run never hits this gate (callers skip ensureWritable).
+	MaintenanceWindows []string `toml:"maintenance_windows,omitempty"`
+}
+
+// ROSStrict reports whether ROS_STRICT=1/true is set (treat all devices as prod for gates).
+func ROSStrict() bool {
+	v := os.Getenv("ROS_STRICT")
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// EffectiveEnvClass returns the env class used for production guardrails.
+// When rosStrict is true, the result is always prod. Empty EnvClass defaults to lab.
+func EffectiveEnvClass(dev DeviceConfig, rosStrict bool) string {
+	if rosStrict {
+		return EnvClassProd
+	}
+	switch strings.ToLower(strings.TrimSpace(dev.EnvClass)) {
+	case EnvClassProd, "production":
+		return EnvClassProd
+	case EnvClassStaging:
+		return EnvClassStaging
+	case EnvClassLab, "":
+		return EnvClassLab
+	default:
+		return EnvClassLab
+	}
+}
+
+// EffectiveMaxSessionChanges returns the session change cap for a device.
+// Explicit MaxSessionChanges > 0 wins. Otherwise prod defaults to 25; other classes are unlimited (0).
+func EffectiveMaxSessionChanges(dev DeviceConfig, envClass string) int {
+	if dev.MaxSessionChanges > 0 {
+		return dev.MaxSessionChanges
+	}
+	if envClass == EnvClassProd {
+		return DefaultMaxSessionChangesProd
+	}
+	return 0
 }
 
 // TLSConfig holds TLS-related settings applied globally unless overridden.
