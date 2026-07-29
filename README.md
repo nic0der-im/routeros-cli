@@ -225,18 +225,41 @@ These are the everyday reads you will use most. Device name `router-edge` is a p
 
 `audit` pulls a structured snapshot so agents (and humans) do not need a full `/export`. Profiles: `full`, `network`, `security`.
 
+Human mode is a **compact boxed summary**: SYSTEM (memory/storage in MB/GB), optional TOP CPU (`/tool/profile`), then column-aligned tables for running interfaces, addresses, routes, DNS, firewall, DHCP, users, and services. Each section closes with a long `└────` bar.
+
+Interface **RX/TX** are cumulative byte counters from the API (`rx-byte` / `tx-byte`), shown as GB/MB — not live Mbps (RouterOS does not expose average rates without sampling).
+
+PPPoE/PPP/L2TP dynamic interfaces (and their addresses) are **hidden by default** so ISP boxes stay readable. Use `--show-ppp` to list them; PPP active sessions appear as a count unless `--show-ppp` is set. Skip the CPU sample with `--skip-cpu-profile` for a faster run.
+
 ```sh
-ros -d router-edge --read-only audit --profile network
+ros -d router-edge --read-only audit --profile full
+ros -d router-edge --read-only audit --show-ppp           # include PPPoE ifaces / session names
+ros -d router-edge --read-only audit --skip-cpu-profile   # skip /tool/profile sample
 ```
 
 ```text
-Audit of "router-edge" (profile=network)
-  interfaces:          14 item(s)
-  ip_addresses:        3 item(s)
-  ip_routes:           3 item(s)
-  dns:                 1 item(s)
-  dhcp_leases:         8 item(s)
-  dhcp_servers:        1 item(s)
+────────────────────────────────────────────────────────
+  AUDIT  router-edge  ·  profile=full
+────────────────────────────────────────────────────────
+┌─ SYSTEM
+│  Edge Router
+│  CCR2004 · arm64 · 7.18.2 (stable)
+│  uptime 1w4d · cpu 6% (4x 1500 MHz · …)
+│  memory 1.20 GB free / 4.00 GB total
+│  storage 110 MB free / 128 MB total · bad-blocks 0%
+└───────────────────────────────────────────────────────
+
+┌─ INTERFACES
+│  214 total · RX/TX = cumulative since counter reset (not live Mbps) · 2 shown, 200 ppp/pppoe omitted (--show-ppp)
+│  NAME    TYPE    RX         TX        COMMENT
+│  ether1  ether   295.34 GB  43.35 GB  WAN
+│  bridge  bridge  43.14 GB   292.62 GB LAN
+└───────────────────────────────────────────────────────
+
+┌─ PPP ACTIVE
+│  200 sessions
+│  (names hidden — use --show-ppp to list)
+└───────────────────────────────────────────────────────
 ```
 
 ### Audit (JSON)

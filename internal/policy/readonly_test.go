@@ -18,6 +18,7 @@ func TestIsWrite(t *testing.T) {
 		{"/export", false},
 		{"/interface/monitor-traffic", false},
 		{"/tool/ping", false},
+		{"/tool/profile", false},
 		{"/ip/address/add", true},
 		{"/ip/address/remove", true},
 		{"/ip/firewall/filter/set", true},

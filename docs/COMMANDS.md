@@ -76,7 +76,8 @@ Bundled packs: `ros` (read/audit) and `ros-safe-apply` (writes via safe sessions
 ## Sessions / agents
 
 ```
-ros --read-only audit --profile full|network|security
+ros --read-only audit --profile full|network|security [--show-ppp] [--skip-cpu-profile]
+# Human: boxed column tables; iface RX/TX = cumulative bytes; PPPoE omitted unless --show-ppp; -o json = full raw maps
 ros session begin|commit|rollback|status|watch
 ros file get <name> [--output ./local] [--via sftp|auto|api|ftp] [--ephemeral-ssh]
 ros backup export [--file ./local.rsc] [--via sftp|auto|api|ftp] [--ephemeral-ssh]

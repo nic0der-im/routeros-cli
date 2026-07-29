@@ -32,7 +32,8 @@ func IsWrite(command string) bool {
 		strings.Contains(lower, "/monitor") ||
 		lower == "/export" ||
 		strings.HasPrefix(lower, "/tool/ping") ||
-		strings.HasPrefix(lower, "/tool/torch") {
+		strings.HasPrefix(lower, "/tool/torch") ||
+		strings.HasPrefix(lower, "/tool/profile") {
 		return false
 	}
 

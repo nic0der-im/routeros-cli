@@ -173,6 +173,125 @@ func TestAuditProfileValidation(t *testing.T) {
 	}
 }
 
+func TestRenderAuditHuman(t *testing.T) {
+	var buf strings.Builder
+	order := []string{"system_identity", "system_resource", "cpu_profile", "interfaces", "ip_addresses", "firewall_filter", "services", "ppp_active"}
+	sections := map[string]interface{}{
+		"system_identity": []map[string]string{{"name": "lab"}},
+		"system_resource": []map[string]string{{
+			"board-name": "RB2011", "architecture-name": "mipsbe", "version": "7.18", "uptime": "1d",
+			"cpu-load": "5", "cpu-count": "1", "cpu-frequency": "600", "cpu": "MIPS",
+			"free-memory": "28651520", "total-memory": "67108864",
+			"free-hdd-space": "115187712", "total-hdd-space": "134217728",
+			"bad-blocks": "0.7", "write-sect-total": "1000", "write-sect-since-reboot": "10",
+		}},
+		"cpu_profile": []map[string]string{
+			{".section": "2", "name": "total", "usage": "5"},
+			{".section": "2", "name": "networking", "usage": "2.5"},
+			{".section": "2", "name": "management", "usage": "1.0"},
+			{".section": "2", "name": "ssh", "usage": "0.5"},
+			{".section": "2", "name": "profiling", "usage": "0"},
+		},
+		"interfaces": []map[string]string{
+			{"name": "ether1", "type": "ether", "running": "true", "comment": "WAN", "rx-byte": "2147483648", "tx-byte": "536870912"},
+			{"name": "ether9", "type": "ether", "running": "false"},
+			{"name": "<pppoe-alice>", "type": "pppoe-in", "running": "true"},
+			{"name": "<pppoe-bob>", "type": "pppoe-in", "running": "true"},
+		},
+		"ip_addresses": []map[string]string{
+			{"address": "192.168.88.1/24", "interface": "bridge", "disabled": "false"},
+			{"address": "10.1.1.2/32", "interface": "<pppoe-alice>", "disabled": "false", "dynamic": "true"},
+		},
+		"firewall_filter": []map[string]string{
+			{".id": "*E", "chain": "forward", "action": "passthrough", "dynamic": "true"},
+			{".id": "*1", "chain": "forward", "action": "accept", "comment": "ok", "dynamic": "false"},
+		},
+		"services": []map[string]string{
+			{"name": "ssh", "port": "22", "address": "192.168.88.0/24", "disabled": "false"},
+			{"name": "ftp", "port": "21", "disabled": "true"},
+		},
+		"ppp_active": []map[string]string{
+			{"name": "alice", "address": "10.1.1.2"},
+			{"name": "bob", "address": "10.1.1.3"},
+		},
+	}
+	if err := renderAuditHuman(&buf, "lab", "full", order, sections, false); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`AUDIT  lab`,
+		"┌─ SYSTEM",
+		"memory 27 MB free / 64 MB total",
+		"storage 110 MB free / 128 MB total · bad-blocks 0.7%",
+		"└───────────────────────────────────────────────────────",
+		"┌─ TOP CPU",
+		"networking",
+		"┌─ INTERFACES",
+		"NAME",
+		"ether1",
+		"2.00 GB",
+		"512 MB",
+		"WAN",
+		"ppp/pppoe omitted",
+		"┌─ ADDRESSES",
+		"192.168.88.1/24",
+		"┌─ FIREWALL FILTER",
+		"forward",
+		"accept",
+		"┌─ SERVICES",
+		"ssh",
+		"192.168.88.0/24",
+		"┌─ PPP ACTIVE",
+		"2 sessions",
+		"--show-ppp",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, no := range []string{"ether9", "passthrough", "ftp", "<pppoe-alice>"} {
+		if strings.Contains(out, no) {
+			t.Fatalf("should omit %q in compact audit:\n%s", no, out)
+		}
+	}
+
+	var buf2 strings.Builder
+	if err := renderAuditHuman(&buf2, "lab", "full", order, sections, true); err != nil {
+		t.Fatal(err)
+	}
+	out2 := buf2.String()
+	if !strings.Contains(out2, "<pppoe-alice>") || !strings.Contains(out2, "alice") {
+		t.Fatalf("expected pppoe details with --show-ppp:\n%s", out2)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	if got := formatBytes("67108864"); got != "64 MB" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestIsPPPLike(t *testing.T) {
+	if !isPPPLike(map[string]string{"type": "pppoe-in", "name": "x"}) {
+		t.Fatal("pppoe-in")
+	}
+	if !isPPPLike(map[string]string{"name": "<pppoe-user>"}) {
+		t.Fatal("dynamic name")
+	}
+	if isPPPLike(map[string]string{"type": "ether", "name": "ether1"}) {
+		t.Fatal("ether should not match")
+	}
+}
+
+func TestFilterPresentColumns(t *testing.T) {
+	rows := []map[string]string{{"name": "ssh", "port": "22", "disabled": "false"}}
+	got := summarizeServices(rows)
+	if len(got) < 2 || !strings.Contains(got[0], "NAME") || !strings.Contains(got[1], "ssh") {
+		t.Fatalf("%v", got)
+	}
+}
+
 func TestGetCommandTree(t *testing.T) {
 	cmd := newGetCmd()
 	subs := map[string]bool{}
