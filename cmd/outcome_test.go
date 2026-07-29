@@ -199,7 +199,10 @@ func TestApplyCreateMutation_CreatedJSON(t *testing.T) {
 	if resp.Meta.Action != ActionCreated {
 		t.Fatalf("action=%q", resp.Meta.Action)
 	}
-	data := resp.Data.(map[string]interface{})
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data type %T", resp.Data)
+	}
 	if data["id"] != "*42" {
 		t.Fatalf("id=%v", data["id"])
 	}
