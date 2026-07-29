@@ -26,7 +26,26 @@ Tired of Winbox because it cannot be automated — while you want your agents to
 
 > **Production caution.** Prefer `--read-only` / `ROS_READ_ONLY=1` until you trust the workflow. For writes: `doctor` → `--dry-run` → `session begin --safe` → apply → verify → `commit`|`rollback`. Use a least-privilege RouterOS user. Set `env_class=prod` (and friends) when the box is real customer gear — see [guardrails in COMMANDS](docs/COMMANDS.md).
 
-### What you get (v0.5)
+## Contents
+
+1. [What you get](#what-you-get)
+2. [Requirements](#requirements)
+3. [Install](#install)
+4. [Build from source](#build-from-source)
+5. [Add a device](#add-a-device)
+6. [Import from Winbox](#import-from-winbox)
+7. [How commands work](#how-commands-work)
+8. [Examples](#examples)
+9. [Safe writes, plans & sessions](#safe-writes-plans--sessions)
+10. [Backups](#backups)
+11. [AI agents](#ai-agents)
+12. [FAQ](#faq)
+13. [Config & secrets](#config--secrets)
+14. [Docs & license](#docs--license)
+
+---
+
+## What you get
 
 | Area | Highlights |
 |------|------------|
@@ -34,11 +53,11 @@ Tired of Winbox because it cannot be automated — while you want your agents to
 | **Production guardrails** | `env_class`, blast-radius / path allow-deny, backup-before-write, exec policy, doctor freshness, maintenance windows, `--confirm` on destructive ops |
 | **Observability** | NDJSON write audit, `meta.request_id`, output caps (`--limit` / `ROS_MAX_OUTPUT_BYTES`), read-only retries |
 | **Diagnose** | `doctor` / `audit` + FINDINGS, `diag log --topics/--since`, `wg peers --stale-after`, wifi / BGP / OSPF views |
-| **Agent fit** | Skill packs **0.5.0**, JSON envelopes, prompt library in [AGENTS.md](docs/AGENTS.md) — CLI contract, not MCP |
+| **Agent fit** | Skill packs, JSON envelopes, prompt library in [AGENTS.md](docs/AGENTS.md) — CLI contract, not MCP |
 
 ---
 
-### Requirements
+## Requirements
 
 | Need | Notes |
 |------|--------|
@@ -52,23 +71,6 @@ Enable the API on the router (example, LAN-only):
 ```text
 /ip/service/set api disabled=no address=192.168.88.0/24
 ```
-
----
-
-## Contents
-
-1. [Install](#install)
-2. [Build from source](#build-from-source)
-3. [Add a device](#add-a-device)
-4. [Import from Winbox](#import-from-winbox)
-5. [How commands work](#how-commands-work)
-6. [Examples](#examples)
-7. [Safe writes, plans & sessions](#safe-writes-plans--sessions)
-8. [Backups](#backups)
-9. [AI agents](#ai-agents)
-10. [FAQ](#faq)
-11. [Config & secrets](#config--secrets)
-12. [Docs & license](#docs--license)
 
 ---
 
@@ -247,7 +249,7 @@ ros -d router-edge --read-only audit --profile hygiene
 
 ### Audit (human)
 
-Profiles: `full`, `network`, `security`, and `hygiene`. Human mode is a compact boxed summary (SYSTEM, interfaces with cumulative RX/TX, routes, firewall, DHCP, …). PPP/PPPoE faces are hidden by default (`--show-ppp` to show). Skip CPU sample with `--skip-cpu-profile`.
+Profiles: `full`, `network`, `security`, and `hygiene`. Human mode is a compact boxed summary (SYSTEM, interfaces with cumulative RX/TX, routes, firewall, DHCP, …). PPP/PPPoE interfaces are hidden by default (`--show-ppp` to list them). Skip the CPU sample with `--skip-cpu-profile`.
 
 ```sh
 ros -d router-edge --read-only audit --profile full
@@ -298,7 +300,10 @@ ros -d router-edge session commit
 - **Safe session** — journals inverses for rollback; prod often requires a local text backup first.
 - **`session watch`** — heartbeat + best-effort auto-rollback on link loss (not RouterOS terminal Safe Mode).
 - **Destructive ops** (`reboot`, `file remove`, …) need `--confirm <exact-inventory-name>`.
-- **YAML plans:**
+
+### YAML plans
+
+Batch several steps in one file, preview them, then apply under a safe session.
 
 ```sh
 ros -d router-edge plan preview --file change.yaml
@@ -324,10 +329,10 @@ ros -d router-edge backup export --file ~/edge.rsc --ephemeral-ssh=false
 
 **Binary backup + local download** (default transport is **SFTP**):
 
-1. Create `.backup` on the router  
-2. Detect your local/public IP  
-3. Temporarily merge those IPs into `/ip/service ssh` allowlist  
-4. Download over SFTP  
+1. Create `.backup` on the router
+2. Detect your local/public IP
+3. Temporarily merge those IPs into `/ip/service ssh` allowlist
+4. Download over SFTP
 5. **Always** restore the previous SSH `disabled` + `address`
 
 ```sh
@@ -346,7 +351,7 @@ Override detection with `--source-ip`, or pull an existing file with `ros file g
 
 ## AI agents
 
-`ros` ships two skill packs (**0.5.0**) that teach the safe workflow (audit/doctor first; writes only inside sessions). **No MCP server** — agents run the CLI.
+`ros` ships two skill packs that teach the safe workflow (audit/doctor first; writes only inside sessions). **No MCP server** — agents run the CLI.
 
 ```sh
 ros skills list
@@ -442,7 +447,7 @@ Legacy `~/.config/routeros-cli/` is migrated automatically on first run.
 | [docs/COMMANDS.md](docs/COMMANDS.md) | Full command reference + guardrails |
 | [docs/AGENTS.md](docs/AGENTS.md) | Skills, prompts, exit codes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failures |
-| [CHANGELOG.md](CHANGELOG.md) | What shipped (incl. v0.5.0) |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 MIT — see [LICENSE](LICENSE).
