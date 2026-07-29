@@ -57,7 +57,7 @@ func LocalToward(host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	addr, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || addr.IP == nil {
 		return "", fmt.Errorf("no local address toward %s", host)
