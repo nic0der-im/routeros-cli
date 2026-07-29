@@ -48,41 +48,49 @@ ros -d router-edge --read-only audit -o json
 
 ## Install
 
-### Pre-built binary (recommended)
+Supported targets: **macOS** (daily driver), **Windows**, **Arch Linux**, **Ubuntu** (incl. ubuntu-server).
 
-**Homebrew (macOS / Linux)**
+### macOS
 
 ```sh
 brew tap nic0der-im/tap
 brew install ros
 ```
 
-**Linux / macOS (install.sh)**
-
-```sh
-curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
-```
-
-**Windows** — download the zip for your arch from the [latest release](https://github.com/nic0der-im/routeros-cli/releases/latest), extract `ros.exe`, and put it on your `PATH`.
-
-**Scoop (Windows)**
+### Windows
 
 ```powershell
 scoop bucket add nic0der-im https://github.com/nic0der-im/scoop-bucket
 scoop install nic0der-im/ros
 ```
 
-**AUR (Arch)**
+Or download `ros_*_windows_*.zip` from the [latest release](https://github.com/nic0der-im/routeros-cli/releases/latest) and put `ros.exe` on `PATH`.
+
+### Arch Linux
 
 ```sh
 yay -S routeros-cli-bin
 # or: paru -S routeros-cli-bin
 ```
 
-**Chocolatey (Windows)** — package template under [`chocolatey/`](chocolatey/); publish to chocolatey.org when ready.
+### Ubuntu (desktop or server)
 
-| OS | Arch | Asset |
-|----|------|-------|
+Prefer the release installer (no Homebrew needed on production boxes):
+
+```sh
+curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
+# custom prefix:
+# curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+Homebrew on Linux also works if you already use it:
+
+```sh
+brew tap nic0der-im/tap && brew install ros
+```
+
+| OS | Arch | Release asset |
+|----|------|---------------|
 | macOS | Apple Silicon | `ros_*_darwin_arm64.tar.gz` |
 | macOS | Intel | `ros_*_darwin_amd64.tar.gz` |
 | Linux | x86_64 | `ros_*_linux_amd64.tar.gz` |
