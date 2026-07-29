@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- README: v0.5 feature showcase, safe-write spine, agent prompts, FAQ vs MCP/SSH/Winbox
+
 ## [0.5.0] — 2026-07-29
 
 Enterprise cut: write-safety (A), production guardrails (G), observability (C), curated surface (B), YAML plans (D), and skill packs **0.5.0** (E). Live smoke on lab `home` (doctor, dry-run, session apply+rollback, backup export, plan preview/apply+rollback, read-only denial). Planned 0.6/0.7 feature slices shipped here in one release.

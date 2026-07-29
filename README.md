@@ -22,10 +22,21 @@ Tired of Winbox because it cannot be automated — while you want your agents to
 
 **This is the solution.**
 
-`ros` speaks the native RouterOS API (not SSH scraping). It returns clean tables or JSON, keeps passwords in the OS keyring, and ships agent skills so LLMs can audit and change routers safely.
+`ros` speaks the **native binary RouterOS API** (not SSH scraping, not REST-as-primary). It returns clean tables or JSON, keeps passwords in the OS keyring, and ships **CLI + skill packs** so LLMs can audit and change routers safely — without burning a context window on 100+ MCP tools.
 
-> **BETA warning.** Do **not** use this in production without the right guardrails.
-> The rules are clear: prefer `--read-only` / `ROS_READ_ONLY=1`, use **safe sessions** for writes, and start with a RouterOS user that has **read-only** permissions until you trust your agent to mutate state.
+> **Production caution.** Prefer `--read-only` / `ROS_READ_ONLY=1` until you trust the workflow. For writes: `doctor` → `--dry-run` → `session begin --safe` → apply → verify → `commit`|`rollback`. Use a least-privilege RouterOS user. Set `env_class=prod` (and friends) when the box is real customer gear — see [guardrails in COMMANDS](docs/COMMANDS.md).
+
+### What you get (v0.5)
+
+| Area | Highlights |
+|------|------------|
+| **Change safety** | `--dry-run` + semantic diffs, idempotent write outcomes, safe-session journals, `plan preview\|apply\|rollback` |
+| **Production guardrails** | `env_class`, blast-radius / path allow-deny, backup-before-write, exec policy, doctor freshness, maintenance windows, `--confirm` on destructive ops |
+| **Observability** | NDJSON write audit, `meta.request_id`, output caps (`--limit` / `ROS_MAX_OUTPUT_BYTES`), read-only retries |
+| **Diagnose** | `doctor` / `audit` + FINDINGS, `diag log --topics/--since`, `wg peers --stale-after`, wifi / BGP / OSPF views |
+| **Agent fit** | Skill packs **0.5.0**, JSON envelopes, prompt library in [AGENTS.md](docs/AGENTS.md) — CLI contract, not MCP |
+
+---
 
 ### Requirements
 
@@ -52,11 +63,12 @@ Enable the API on the router (example, LAN-only):
 4. [Import from Winbox](#import-from-winbox)
 5. [How commands work](#how-commands-work)
 6. [Examples](#examples)
-7. [Safe writes & sessions](#safe-writes--sessions)
+7. [Safe writes, plans & sessions](#safe-writes-plans--sessions)
 8. [Backups](#backups)
 9. [AI agents](#ai-agents)
-10. [Config & secrets](#config--secrets)
-11. [Docs & license](#docs--license)
+10. [FAQ](#faq)
+11. [Config & secrets](#config--secrets)
+12. [Docs & license](#docs--license)
 
 ---
 
@@ -147,6 +159,8 @@ ros device list
 
 Rotate a secret later: `ros device auth set <name>`.
 
+Optional per-device production fields in `config.toml` (`env_class`, `maintenance_windows`, write path allow/deny, …) — see [COMMANDS.md](docs/COMMANDS.md).
+
 ---
 
 ## Import from Winbox
@@ -198,10 +212,11 @@ ros -d <DEVICE> <verb> <domain|/raw/path> [params...]
 | Verb | Meaning |
 |------|---------|
 | `get` | Read |
-| `create` / `set` / `delete` | Mutate |
+| `create` / `set` / `delete` | Mutate (honor `--dry-run`) |
 | `enable` / `disable` | Toggle |
-| `audit` | Multi-domain read-only snapshot |
-| `exec` | Raw API escape hatch |
+| `audit` / `doctor` | Multi-domain snapshot / hygiene FINDINGS |
+| `plan` | YAML preview / apply / rollback |
+| `exec` | Raw API escape hatch (policy-gated) |
 
 Curated domain aliases (shortcuts to API paths):
 
@@ -209,9 +224,9 @@ Curated domain aliases (shortcuts to API paths):
 ros domains
 ```
 
-Examples of aliases: `firewall/filter` → `/ip/firewall/filter`, `radius` → `/radius`, `interface` → `/interface`.
+Examples: `firewall/filter` → `/ip/firewall/filter`, `dns/static` → `/ip/dns/static`, `wg/peers` → `/interface/wireguard/peers`.
 
-Params: `key=value` becomes RouterOS `=key=value`; target a row with `.id=*1`; filter with `?=disabled=false`.
+Params: `key=value` becomes RouterOS `=key=value`; target a row with `.id=*1` or (filter/mangle) `--comment`; filter with `?=disabled=false` / `get --where`.
 
 Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 
@@ -219,135 +234,86 @@ Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 
 ## Examples
 
-These are the everyday reads you will use most. Device name `router-edge` is a placeholder — use your inventory name.
+Device name `router-edge` is a placeholder — use your inventory name.
+
+### Doctor / hygiene FINDINGS
+
+```sh
+ros -d router-edge --read-only doctor
+ros -d router-edge --read-only audit --profile hygiene
+```
+
+`doctor` is the thin hygiene pass agents should run before writes. FINDINGS cover cloud DDNS, backup clutter, iface drops, FastTrack, DHCP lease hygiene, WireGuard peer staleness, netwatch down, DNS static clutter, and more.
 
 ### Audit (human)
 
-`audit` pulls a structured snapshot so agents (and humans) do not need a full `/export`. Profiles: `full`, `network`, `security`, and `hygiene`.
-
-Human mode is a **compact boxed summary**: SYSTEM (memory/storage in MB/GB), optional TOP CPU (`/tool/profile`), then column-aligned tables for running interfaces, addresses, routes, DNS, firewall, DHCP, users, and services. Each section closes with a long `└────` bar.
-
-Interface **RX/TX** are cumulative byte counters from the API (`rx-byte` / `tx-byte`), shown as GB/MB — not live Mbps (RouterOS does not expose average rates without sampling).
-
-PPPoE/PPP/L2TP dynamic interfaces (and their addresses) are **hidden by default** so ISP boxes stay readable. Use `--show-ppp` to list them; PPP active sessions appear as a count unless `--show-ppp` is set. Skip the CPU sample with `--skip-cpu-profile` for a faster run.
-
-Use `--profile hygiene` for a compact optimization pass: Cloud DDNS flags, on-router `*.backup` clutter, running-iface drop counters, FastTrack/fast-path flags, enabled services plus disabled management leftovers, DHCP waiting/duplicate-MAC hints, plus soft-fetched WireGuard peers / netwatch / DNS static for FINDINGS (always skips `/tool/profile`).
+Profiles: `full`, `network`, `security`, and `hygiene`. Human mode is a compact boxed summary (SYSTEM, interfaces with cumulative RX/TX, routes, firewall, DHCP, …). PPP/PPPoE faces are hidden by default (`--show-ppp` to show). Skip CPU sample with `--skip-cpu-profile`.
 
 ```sh
 ros -d router-edge --read-only audit --profile full
-ros -d router-edge --read-only audit --profile hygiene   # cloud / backups / drops / FastTrack / DHCP hygiene
-ros -d router-edge --read-only audit --show-ppp           # include PPPoE ifaces / session names
-ros -d router-edge --read-only audit --skip-cpu-profile   # skip /tool/profile sample
-```
-
-```text
-────────────────────────────────────────────────────────
-  AUDIT  router-edge  ·  profile=full
-────────────────────────────────────────────────────────
-┌─ SYSTEM
-│  Edge Router
-│  CCR2004 · arm64 · 7.18.2 (stable)
-│  uptime 1w4d · cpu 6% (4x 1500 MHz · …)
-│  memory 1.20 GB free / 4.00 GB total
-│  storage 110 MB free / 128 MB total · bad-blocks 0%
-└───────────────────────────────────────────────────────
-
-┌─ INTERFACES
-│  214 total · RX/TX = cumulative since counter reset (not live Mbps) · 2 shown, 200 ppp/pppoe omitted (--show-ppp)
-│  NAME    TYPE    RX         TX        COMMENT
-│  ether1  ether   295.34 GB  43.35 GB  WAN
-│  bridge  bridge  43.14 GB   292.62 GB LAN
-└───────────────────────────────────────────────────────
-
-┌─ PPP ACTIVE
-│  200 sessions
-│  (names hidden — use --show-ppp to list)
-└───────────────────────────────────────────────────────
+ros -d router-edge --read-only audit --profile hygiene
 ```
 
 ### Audit (JSON)
 
-Same data as a stable envelope for agents: `{ "ok", "data", "meta" }`. Exit code `4` means a read-only violation.
+Stable envelope for agents: `{ "ok", "data", "meta" }` with `meta.request_id`. Exit code `4` means a read-only violation.
 
 ```sh
 ros -d router-edge --read-only audit --profile security -o json
 ```
 
-```json
-{
-  "ok": true,
-  "data": {
-    "firewall_filter": [ { ".id": "*1", "chain": "forward", "action": "accept" } ],
-    "users": [ { "name": "admin", "group": "full" } ]
-  },
-  "meta": {
-    "device": "router-edge",
-    "command": "audit",
-    "timestamp": "2026-07-29T05:00:00Z"
-  }
-}
-```
-
-### Interfaces
+### Interfaces / firewall / RADIUS
 
 ```sh
 ros -d router-edge get interface
-```
-
-```text
-.ID  NAME     TYPE       RUNNING  DISABLED  COMMENT
-*1   ether1   ether      true     false     WAN
-*2   bridge   bridge     true     false     LAN
-*E   wg-msp   wireguard  true     false     MSP tunnel
-```
-
-### Firewall filter rules
-
-```sh
 ros -d router-edge get firewall/filter
-```
-
-```text
-.ID  CHAIN    ACTION                  COMMENT
-*1   forward  fasttrack-connection    FastTrack Established/Related
-*3   forward  accept                  Accept Established/Related
-*A   input    drop                    Drop all other input
-```
-
-### RADIUS servers
-
-```sh
 ros -d router-edge get radius
 ```
 
-```text
-.ID  SERVICE  ADDRESS        TIMEOUT  COMMENT
-*1   login    10.0.0.50      300ms    Central AAA
-*2   ppp      10.0.0.50      300ms    Central AAA
+### WireGuard / logs
+
+```sh
+ros -d router-edge wg peers --stale-after 5m
+ros -d router-edge diag log --topics error,warning --since 1h --limit 50
 ```
 
 ---
 
-## Safe writes & sessions
+## Safe writes, plans & sessions
 
-For anything that changes the router, prefer a **safe session**. Changes are journaled so you can `rollback` if something goes wrong.
+**Spine:** `doctor` → mutate `--dry-run` → approve → `session begin --safe` → apply → verify → `commit` or `rollback`.
 
 ```sh
+ros -d router-edge doctor
+ros -d router-edge create firewall/address-list list=blacklist address=203.0.113.10 --dry-run
+
 ros -d router-edge session begin --safe
-ros -d router-edge create firewall/filter chain=forward action=accept protocol=tcp dst-port=443
+ros -d router-edge create firewall/address-list list=blacklist address=203.0.113.10
 ros -d router-edge session status
 ros -d router-edge session commit
 # or: ros -d router-edge session rollback
 ```
 
-`session watch` can heartbeat the link and auto-rollback when connectivity is lost (useful for remote applies).
+- **`--dry-run`** — no write; prints a semantic preview / JSON `action=dry_run`.
+- **Safe session** — journals inverses for rollback; prod often requires a local text backup first.
+- **`session watch`** — heartbeat + best-effort auto-rollback on link loss (not RouterOS terminal Safe Mode).
+- **Destructive ops** (`reboot`, `file remove`, …) need `--confirm <exact-inventory-name>`.
+- **YAML plans:**
+
+```sh
+ros -d router-edge plan preview --file change.yaml
+ros -d router-edge session begin --safe
+ros -d router-edge plan apply --file change.yaml
+ros -d router-edge plan rollback   # alias of session rollback
+```
+
+Details: [COMMANDS.md](docs/COMMANDS.md).
 
 ---
 
 ## Backups
 
-**Text export** — writes `/export file=…` on the router and downloads the `.rsc`
-(SFTP by default). The API stream is empty on many RouterOS 7 devices; this path works.
+**Text export** — writes `/export file=…` on the router and downloads the `.rsc` (SFTP by default). The API stream is empty on many RouterOS 7 devices; this path works.
 
 ```sh
 ros -d router-edge backup export --file ~/router-edge-$(date +%F).rsc
@@ -380,16 +346,16 @@ Override detection with `--source-ip`, or pull an existing file with `ros file g
 
 ## AI agents
 
-`ros` ships two skill packs that teach agents the safe workflow (audit first; writes only inside sessions).
+`ros` ships two skill packs (**0.5.0**) that teach the safe workflow (audit/doctor first; writes only inside sessions). **No MCP server** — agents run the CLI.
 
 ```sh
 ros skills list
-ros skills install --agent all --scope user
+ros skills install --agent all --scope user --force   # after upgrading ros
 ```
 
 | Pack | Use |
 |------|-----|
-| `ros` | Inventory, audit, read-only `get` |
+| `ros` | Inventory, audit/doctor, read-only `get`, diagnose |
 | `ros-safe-apply` | Mutations inside `session begin --safe` |
 
 Recommended agent environment:
@@ -397,9 +363,33 @@ Recommended agent environment:
 ```sh
 export ROS_READ_ONLY=1
 export ROS_DEFAULT_OUTPUT=json
+# optional: ROS_PROFILE=agent   # requires safe session for all writes
 ```
 
-Details, exit codes, and JSON error kinds: [docs/AGENTS.md](docs/AGENTS.md).
+### Example prompts
+
+```text
+Audit router-edge with ros (read-only). Run doctor/hygiene, summarize FINDINGS,
+propose changes without applying. Load skill ros only.
+```
+
+```text
+Using ros-safe-apply on router-edge: doctor, dry-run the firewall change, then
+session begin --safe, apply the minimal create/set, verify with --read-only get,
+and session commit (or rollback). Unset ROS_READ_ONLY before writes.
+```
+
+```text
+Show WireGuard peers on router-edge with ros wg peers --stale-after 5m.
+Flag peers with empty/old handshakes. Do not delete anything.
+```
+
+```text
+Preview this YAML plan on router-edge with ros plan preview --file change.yaml.
+Explain risks; wait for approval before plan apply under a safe session.
+```
+
+Full prompt library, exit codes, and recovery map: [docs/AGENTS.md](docs/AGENTS.md).
 
 | Exit | Meaning |
 |------|---------|
@@ -411,6 +401,26 @@ Details, exit codes, and JSON error kinds: [docs/AGENTS.md](docs/AGENTS.md).
 
 ---
 
+## FAQ
+
+### `ros` vs MCP servers for MikroTik?
+
+MCP tool catalogs burn context and often wrap REST/SSH poorly. `ros` is a **CLI + skill packs** contract: agents call real commands, get stable JSON (`meta.request_id`, write outcomes), and stay inside dry-run / safe-session / guardrail rails. If you want MCP, that is a different product — this repo is intentionally not one.
+
+### `ros` vs raw RouterOS API / Winbox?
+
+Winbox is excellent for humans and terrible for automation. The raw API is powerful but untyped for LLMs. `ros` adds inventory + keyring, curated verbs/aliases, human tables, agent JSON, and change safety on top of the **binary API**.
+
+### `ros` vs SSH scraping?
+
+SSH screen-scraping breaks across versions and locales. `ros` uses the API for structured reads/writes. SSH/SFTP appears only where needed (backup download, ephemeral allowlist). Diagnostics like ping/traceroute still go through the router API tools.
+
+### Is it safe for production?
+
+Safer than improvising `/export` + paste — **if** you set `env_class`, run `doctor`, prefer dry-run + safe sessions, and use least-privilege RouterOS users. Break-glass flags (`--skip-doctor-gate`, `--force-no-backup`, …) are audited/warned for a reason. Start on lab gear (`home`), then promote.
+
+---
+
 ## Config & secrets
 
 | What | Where |
@@ -418,6 +428,8 @@ Details, exit codes, and JSON error kinds: [docs/AGENTS.md](docs/AGENTS.md).
 | Inventory | `~/.config/ros/config.toml` |
 | Passwords | OS keyring (service name `ros`) |
 | Sessions | `~/.config/ros/sessions/` |
+| Write audit | `~/.config/ros/audit/writes-YYYY-MM-DD.ndjson` |
+| Doctor stamp | `~/.config/ros/state/<device>.doctor` |
 
 Legacy `~/.config/routeros-cli/` is migrated automatically on first run.
 
@@ -427,9 +439,10 @@ Legacy `~/.config/routeros-cli/` is migrated automatically on first run.
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/COMMANDS.md](docs/COMMANDS.md) | Full command reference |
-| [docs/AGENTS.md](docs/AGENTS.md) | Agent / skill workflow |
+| [docs/COMMANDS.md](docs/COMMANDS.md) | Full command reference + guardrails |
+| [docs/AGENTS.md](docs/AGENTS.md) | Skills, prompts, exit codes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failures |
+| [CHANGELOG.md](CHANGELOG.md) | What shipped (incl. v0.5.0) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 MIT — see [LICENSE](LICENSE).
