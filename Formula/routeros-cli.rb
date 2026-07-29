@@ -2,27 +2,27 @@ class Ros < Formula
   desc "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
   homepage "https://github.com/nic0der-im/routeros-cli"
   license "MIT"
-  version "0.2.0"
+  version "0.3.0"
 
   on_macos do
     on_arm do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_darwin_arm64.tar.gz"
-      sha256 "c024be3bd789606b47d7b3319729848e73a55c15791e4fdb20a1bf47b10e07eb"
+      sha256 "a926d1fa2ec18b5dfb447fb448d24fed097472028ed4211ccb20fec1351e6d83"
     end
     on_intel do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_darwin_amd64.tar.gz"
-      sha256 "41e4384f44a3d05f7bda23644e3306385f7fa15c129d046b99778c66bee05d2c"
+      sha256 "96b81a1c1357bd69d24125b2178de35bce179d225fad61b75d28eacfe95e18c1"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_linux_arm64.tar.gz"
-      sha256 "3b25b9e73170a08c621dbaa738a9c8abc718d83256b770a6e2e372e2da1de2b4"
+      sha256 "d262b6ad1a6e8313502f4118036b46e0b15c98d67f83ed2ffe0b8a2c45347924"
     end
     on_intel do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_linux_amd64.tar.gz"
-      sha256 "db6f702e862c2a883d4b35ab961134a0da9552d9887a9b758d582fce46fbd794"
+      sha256 "9bc7be59b01196c5ee377ed6ef144c6465efe4cead708f48c7e3f6ca2c9a571a"
     end
   end
 

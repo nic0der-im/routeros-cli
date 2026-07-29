@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Template for Chocolatey package. Publish via a chocolatey.org package maintainer account. -->
+<!-- Template for Chocolatey package. Publish via chocolatey.org with API key. -->
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>ros</id>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <title>ros (routeros-cli)</title>
     <authors>nic0der-im</authors>
     <owners>nic0der-im</owners>

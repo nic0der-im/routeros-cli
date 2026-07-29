@@ -68,11 +68,18 @@ curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install
 **Scoop (Windows)**
 
 ```powershell
-# After adding a scoop bucket that vendors scoop/ros.json from this repo:
-scoop install ros
+scoop bucket add nic0der-im https://github.com/nic0der-im/scoop-bucket
+scoop install nic0der-im/ros
 ```
 
-**AUR (Arch)** — package template: [`aur/PKGBUILD`](aur/PKGBUILD) (`routeros-cli-bin`). Publish/update via your AUR account.
+**AUR (Arch)**
+
+```sh
+yay -S routeros-cli-bin
+# or: paru -S routeros-cli-bin
+```
+
+**Chocolatey (Windows)** — package template under [`chocolatey/`](chocolatey/); publish to chocolatey.org when ready.
 
 | OS | Arch | Asset |
 |----|------|-------|
@@ -611,8 +618,9 @@ Legacy `~/.config/routeros-cli/` is migrated automatically.
 
 ### Still maintainer-side / ongoing
 
-- [ ] Push AUR package live (`routeros-cli-bin` on aur.archlinux.org)
-- [ ] Publish Scoop bucket / Chocolatey.org package from templates
+- [x] Push AUR package live (`routeros-cli-bin` on aur.archlinux.org) — v0.3.0
+- [x] Publish Scoop bucket (`nic0der-im/scoop-bucket`)
+- [ ] Publish Chocolatey.org package from [`chocolatey/`](chocolatey/) template
 - [ ] Expand capa linda further as field needs appear
 - [ ] Harden skill packs after more production apply workflows
 
