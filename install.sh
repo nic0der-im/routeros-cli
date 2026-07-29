@@ -6,7 +6,7 @@ set -e
 REPO="nic0der-im/routeros-cli"
 BINARY="ros"
 LEGACY_BINARY="routeros-cli"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect OS and architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"

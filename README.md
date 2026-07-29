@@ -123,7 +123,15 @@ Or without cloning:
 
 ```sh
 go install github.com/nic0der-im/routeros-cli@latest
-# binary lands in $(go env GOPATH)/bin — ensure that dir is on PATH
+# installs as $(go env GOPATH)/bin/routeros-cli (module path name)
+# symlink if you want the short name:
+# ln -sf "$(go env GOPATH)/bin/routeros-cli" "$(go env GOPATH)/bin/ros"
+```
+
+`install.sh` respects `INSTALL_DIR` (default `/usr/local/bin`):
+
+```sh
+INSTALL_DIR="$HOME/.local/bin" curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
 ```
 
 ### macOS
