@@ -1,16 +1,16 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "CLI for MikroTik RouterOS (binary name: ros)",
   "homepage": "https://github.com/nic0der-im/routeros-cli",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.4.0/ros_0.4.0_windows_amd64.zip",
-      "hash": "9301d671b02f480d08e40185d4359cb3b4059174ed207c6267026b1a3c99c115"
+      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.5.0/ros_0.5.0_windows_amd64.zip",
+      "hash": "5bd6b3521b9711564f8e4310721b46adc175a6c77746c1561757f877ef30cc1c"
     },
     "arm64": {
-      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.4.0/ros_0.4.0_windows_arm64.zip",
-      "hash": "7f0262845627f1fbba9cfd3f580827a5cb46e1bd0304823dc3e3bfe895342838"
+      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.5.0/ros_0.5.0_windows_arm64.zip",
+      "hash": "9baa00c8be3993481d86c35d808b5da3c10e0631b9b384406d760aa6fecbe69e"
     }
   },
   "bin": [
