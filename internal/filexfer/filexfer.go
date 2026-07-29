@@ -95,13 +95,13 @@ func downloadFTP(ctx context.Context, host, user, pass, remoteName, localPath st
 	if err != nil {
 		return 0, fmt.Errorf("ftp retr %q: %w", remoteName, err)
 	}
-	defer resp.Close()
+	defer func() { _ = resp.Close() }()
 
 	f, err := os.Create(localPath)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	n, err := io.Copy(f, resp)
 	if err != nil {

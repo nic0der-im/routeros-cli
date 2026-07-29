@@ -197,7 +197,7 @@ over the binary API).`,
 					if err != nil {
 						return err
 					}
-					defer c.Close()
+					defer func() { _ = c.Close() }()
 					_, err = c.Run(pctx, "/system/identity/print")
 					return err
 				},
@@ -206,7 +206,7 @@ over the binary API).`,
 					if err != nil {
 						return err
 					}
-					defer c.Close()
+					defer func() { _ = c.Close() }()
 					return applySessionRollback(rctx, a, c, s, cmd.OutOrStdout())
 				},
 				OnLinkLost: func(s *session.Session) {
