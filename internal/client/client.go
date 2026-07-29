@@ -5,7 +5,9 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -61,10 +63,9 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*RouterOSClient, error) {
 	)
 
 	if cfg.UseTLS {
-		tlsCfg := &tls.Config{
-			InsecureSkipVerify: cfg.InsecureSkipVerify,
-			MinVersion:         tls.VersionTLS12,
-			MaxVersion:         tls.VersionTLS12,
+		tlsCfg, tlsErr := buildTLSConfig(cfg)
+		if tlsErr != nil {
+			return nil, fmt.Errorf("building TLS config: %w", tlsErr)
 		}
 		conn, err = routeros.DialTLSContext(ctx, cfg.Address, cfg.Username, cfg.Password, tlsCfg)
 	} else {
@@ -78,9 +79,34 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*RouterOSClient, error) {
 	return &RouterOSClient{conn: conn}, nil
 }
 
+func buildTLSConfig(cfg ConnectConfig) (*tls.Config, error) {
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // intentional for self-signed lab routers
+		MinVersion:         tls.VersionTLS12,
+	}
+
+	if cfg.CACertPath != "" {
+		pem, err := os.ReadFile(cfg.CACertPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA cert %q: %w", cfg.CACertPath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("parsing CA cert %q: no certificates found", cfg.CACertPath)
+		}
+		tlsCfg.RootCAs = pool
+	}
+
+	return tlsCfg, nil
+}
+
 // Run executes a RouterOS command and returns the result. Arguments that do
 // not already start with "=" or "?" are automatically prefixed with "=".
 func (c *RouterOSClient) Run(ctx context.Context, command string, args ...string) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("running %s: %w", command, err)
+	}
+
 	cmdArgs := make([]string, 0, 1+len(args))
 	cmdArgs = append(cmdArgs, command)
 
@@ -96,9 +122,15 @@ func (c *RouterOSClient) Run(ctx context.Context, command string, args ...string
 		return nil, fmt.Errorf("running %s: %w", command, err)
 	}
 
-	sentences := make([]map[string]string, 0, len(reply.Re))
+	sentences := make([]map[string]string, 0, len(reply.Re)+1)
 	for _, sentence := range reply.Re {
 		sentences = append(sentences, sentence.Map)
+	}
+	// /add replies put the created .id in !done =ret=*N (not in !re).
+	if reply.Done != nil {
+		if ret, ok := reply.Done.Map["ret"]; ok && ret != "" {
+			sentences = append(sentences, map[string]string{"ret": ret, ".id": ret})
+		}
 	}
 
 	return &Result{Sentences: sentences}, nil

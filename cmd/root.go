@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,15 +13,18 @@ import (
 	"github.com/nic0der-im/routeros-cli/internal/credential"
 	"github.com/nic0der-im/routeros-cli/internal/device"
 	"github.com/nic0der-im/routeros-cli/internal/output"
+	"github.com/nic0der-im/routeros-cli/internal/policy"
+	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
 )
 
 // Exit codes.
 const (
-	ExitOK         = 0
-	ExitCmdError   = 1
-	ExitConnError  = 2
-	ExitConfError  = 3
+	ExitOK        = 0
+	ExitCmdError  = 1
+	ExitConnError = 2
+	ExitConfError = 3
+	ExitReadOnly  = 4
 )
 
 // App holds shared dependencies injected into all commands.
@@ -29,38 +33,48 @@ type App struct {
 	CfgPath   string
 	Inventory *device.Inventory
 	Creds     credential.Store
+	Sessions  *session.Store
 	OutFormat output.Format
 	Timeout   time.Duration
 	Verbose   bool
 	NoColor   bool
+	ReadOnly  bool
+	RawJSON   bool
 }
 
 // Global flags.
 var (
-	flagDevice  string
-	flagOutput  string
-	flagConfig  string
-	flagTimeout string
-	flagVerbose bool
-	flagNoColor bool
+	flagDevice   string
+	flagOutput   string
+	flagConfig   string
+	flagTimeout  string
+	flagVerbose  bool
+	flagNoColor  bool
+	flagReadOnly bool
+	flagRawJSON  bool
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "routeros-cli",
-	Short: "MikroTik RouterOS CLI management tool",
-	Long:  "A CLI tool for managing MikroTik RouterOS routers with structured output for humans and AI agents.",
+	Use:     "ros",
+	Aliases: []string{"routeros-cli"},
+	Short:   "MikroTik RouterOS CLI for humans and AI agents",
+	Long: `ros is a CLI tool for managing MikroTik RouterOS routers with structured
+output for humans and AI agents. Supports multi-device inventory, read-only
+agent mode, and safe sessions with rollback.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
 
 func init() {
 	pf := rootCmd.PersistentFlags()
-	pf.StringVarP(&flagDevice, "device", "d", "", "device name from inventory")
+	pf.StringVarP(&flagDevice, "device", "d", "", "device name, id, or IP from inventory")
 	pf.StringVarP(&flagOutput, "output", "o", "", "output format: table or json")
 	pf.StringVar(&flagConfig, "config", "", "config file path")
 	pf.StringVar(&flagTimeout, "timeout", "10s", "connection timeout")
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable color output")
+	pf.BoolVar(&flagReadOnly, "read-only", false, "refuse all write commands (also: ROS_READ_ONLY=1)")
+	pf.BoolVar(&flagRawJSON, "raw", false, "include raw RouterOS fields in JSON output")
 }
 
 // loadApp initializes the App from flags and config.
@@ -74,8 +88,14 @@ func loadApp() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 
 	outFmt := cfg.DefaultOutput
+	if envOut := os.Getenv("ROS_DEFAULT_OUTPUT"); envOut != "" {
+		outFmt = envOut
+	}
 	if flagOutput != "" {
 		outFmt = flagOutput
 	}
@@ -89,15 +109,25 @@ func loadApp() (*App, error) {
 		return nil, fmt.Errorf("invalid timeout: %w", err)
 	}
 
+	readOnly := flagReadOnly || os.Getenv("ROS_READ_ONLY") == "1" || os.Getenv("ROS_READ_ONLY") == "true"
+
+	sessStore, err := session.NewStore(session.DefaultDir())
+	if err != nil {
+		return nil, fmt.Errorf("initializing session store: %w", err)
+	}
+
 	return &App{
 		Config:    cfg,
 		CfgPath:   cfgPath,
 		Inventory: device.NewInventory(cfg, cfgPath),
 		Creds:     credential.NewKeyringStore(),
+		Sessions:  sessStore,
 		OutFormat: format,
 		Timeout:   timeout,
 		Verbose:   flagVerbose,
 		NoColor:   flagNoColor,
+		ReadOnly:  readOnly,
+		RawJSON:   flagRawJSON,
 	}, nil
 }
 
@@ -128,7 +158,12 @@ func (a *App) connect(ctx context.Context) (client.Client, string, error) {
 		return nil, name, fmt.Errorf("connecting to %q (%s): %w", name, dev.Address, err)
 	}
 
-	return c, name, nil
+	var cli client.Client = c
+	if a.ReadOnly {
+		cli = policy.WrapReadOnly(c)
+	}
+
+	return cli, name, nil
 }
 
 // render outputs data in the configured format.
@@ -139,7 +174,8 @@ func (a *App) render(w io.Writer, data output.Renderable, deviceName, command st
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Count:     len(data.TableRows()),
 	}
-	return output.Render(w, a.OutFormat, data, meta)
+	opts := output.Options{Raw: a.RawJSON}
+	return output.Render(w, a.OutFormat, data, meta, opts)
 }
 
 // renderError outputs an error in the configured format.
@@ -165,6 +201,17 @@ func Execute() error {
 		newMonitorCmd(),
 		newExecCmd(),
 		newSchemaCmd(),
+		newAuditCmd(),
+		newSessionCmd(),
+		newGetCmd(),
+		newCreateCmd(),
+		newSetCmd(),
+		newDeleteCmd(),
+		newEnableCmd(),
+		newDisableCmd(),
+		newDomainsCmd(),
+		newDiagCmd(),
+		newSkillsCmd(),
 	)
 	return rootCmd.Execute()
 }
@@ -188,7 +235,32 @@ func runWithClient(cmdInstance *cobra.Command, rosCommand string, fn func(ctx co
 	defer func() { _ = c.Close() }()
 
 	if err := fn(ctx, a, c, deviceName); err != nil {
+		var roErr *policy.ErrReadOnly
+		if errors.As(err, &roErr) {
+			a.renderError(os.Stderr, "read_only_violation", err.Error(), deviceName)
+			os.Exit(ExitReadOnly)
+		}
 		a.renderError(os.Stderr, "command_failed", err.Error(), deviceName)
 		os.Exit(ExitCmdError)
 	}
+}
+
+// ensureWritable returns an error if the app is in read-only mode.
+func (a *App) ensureWritable(action string) error {
+	if a.ReadOnly {
+		return &policy.ErrReadOnly{Command: action}
+	}
+	return nil
+}
+
+// recordSafeChange appends a change to the active safe session if one exists.
+func (a *App) recordSafeChange(deviceName string, change session.Change) error {
+	sess, err := a.Sessions.Active(deviceName)
+	if err != nil {
+		return err
+	}
+	if sess == nil {
+		return nil
+	}
+	return a.Sessions.AppendChange(sess, change)
 }

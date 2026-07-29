@@ -15,6 +15,11 @@ const (
 	FormatJSON Format = "json"
 )
 
+// Options controls optional rendering behavior.
+type Options struct {
+	Raw bool // when true and data implements RawRenderable, include raw fields
+}
+
 // ParseFormat converts a string to a Format, returning an error for unknown values.
 func ParseFormat(s string) (Format, error) {
 	switch s {
@@ -33,6 +38,11 @@ type Renderable interface {
 	TableRows() [][]string
 }
 
+// RawRenderable optionally exposes raw RouterOS sentence maps (including .id).
+type RawRenderable interface {
+	RawRecords() []map[string]string
+}
+
 // Meta holds metadata included in the JSON response envelope.
 type Meta struct {
 	Device    string `json:"device"`
@@ -42,12 +52,16 @@ type Meta struct {
 }
 
 // Render dispatches to RenderTable or RenderJSON based on the requested format.
-func Render(w io.Writer, format Format, data Renderable, meta Meta) error {
+func Render(w io.Writer, format Format, data Renderable, meta Meta, opts ...Options) error {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	switch format {
 	case FormatTable:
 		return RenderTable(w, data)
 	case FormatJSON:
-		return RenderJSON(w, data, meta)
+		return RenderJSON(w, data, meta, o)
 	default:
 		return fmt.Errorf("unsupported output format: %q", format)
 	}

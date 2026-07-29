@@ -15,9 +15,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
           cache: true
 
       - name: Run golangci-lint
@@ -27,32 +27,44 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
           cache: true
 
       - name: Run tests
-        run: go test ./...
+        run: go test ./... -coverprofile=coverage.out
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -5
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
           cache: true
 
       - name: Build
-        run: go build -o routeros-cli .
+        run: go build -o ros .
+
+      - name: Smoke version
+        run: ./ros version

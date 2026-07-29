@@ -453,3 +453,12 @@ func (g GenericResults) TableRows() [][]string {
 	}
 	return rows
 }
+
+// RawRecords exposes the underlying RouterOS sentence maps (including .id).
+func (g GenericResults) RawRecords() []map[string]string {
+	out := make([]map[string]string, len(g.Items))
+	for i, item := range g.Items {
+		out[i] = item.Fields
+	}
+	return out
+}

@@ -1,10 +1,11 @@
 #!/bin/sh
-# routeros-cli installer
+# ros (routeros-cli) installer
 # Usage: curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
 set -e
 
 REPO="nic0der-im/routeros-cli"
-BINARY="routeros-cli"
+BINARY="ros"
+LEGACY_BINARY="routeros-cli"
 INSTALL_DIR="/usr/local/bin"
 
 # Detect OS and architecture
@@ -41,20 +42,25 @@ fi
 
 echo "Installing ${BINARY} v${TAG} (${OS}/${ARCH})..."
 
-# Download
+# Prefer new ros_ naming; fall back to legacy routeros-cli_ archives.
 ARCHIVE="${BINARY}_${TAG}_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/v${TAG}/${ARCHIVE}"
-
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-curl -sSL "$URL" -o "${TMPDIR}/${ARCHIVE}"
+if ! curl -sSL -f "$URL" -o "${TMPDIR}/${ARCHIVE}" 2>/dev/null; then
+    ARCHIVE="${LEGACY_BINARY}_${TAG}_${OS}_${ARCH}.tar.gz"
+    URL="https://github.com/${REPO}/releases/download/v${TAG}/${ARCHIVE}"
+    echo "Trying legacy archive name..."
+    curl -sSL -f "$URL" -o "${TMPDIR}/${ARCHIVE}"
+fi
 
-# Extract
 tar -xzf "${TMPDIR}/${ARCHIVE}" -C "$TMPDIR"
 
-# Install
 BINARY_PATH=$(find "$TMPDIR" -name "$BINARY" -type f | head -1)
+if [ -z "$BINARY_PATH" ]; then
+    BINARY_PATH=$(find "$TMPDIR" -name "$LEGACY_BINARY" -type f | head -1)
+fi
 
 if [ -z "$BINARY_PATH" ]; then
     echo "Error: binary not found in archive."
@@ -63,19 +69,36 @@ fi
 
 chmod +x "$BINARY_PATH"
 
-if [ -w "$INSTALL_DIR" ]; then
-    mv "$BINARY_PATH" "${INSTALL_DIR}/${BINARY}"
-else
-    echo "Installing to ${INSTALL_DIR} (requires sudo)..."
-    sudo mv "$BINARY_PATH" "${INSTALL_DIR}/${BINARY}"
+install_bin() {
+    src="$1"
+    dest="$2"
+    if [ -w "$INSTALL_DIR" ]; then
+        mv "$src" "$dest"
+    else
+        echo "Installing to ${dest} (requires sudo)..."
+        sudo mv "$src" "$dest"
+    fi
+}
+
+install_bin "$BINARY_PATH" "${INSTALL_DIR}/${BINARY}"
+
+# Compatibility symlink
+if [ ! -e "${INSTALL_DIR}/${LEGACY_BINARY}" ] || [ -L "${INSTALL_DIR}/${LEGACY_BINARY}" ]; then
+    if [ -w "$INSTALL_DIR" ]; then
+        ln -sf "$BINARY" "${INSTALL_DIR}/${LEGACY_BINARY}"
+    else
+        sudo ln -sf "$BINARY" "${INSTALL_DIR}/${LEGACY_BINARY}"
+    fi
 fi
 
 echo ""
-echo "routeros-cli v${TAG} installed to ${INSTALL_DIR}/${BINARY}"
+echo "ros v${TAG} installed to ${INSTALL_DIR}/${BINARY}"
+echo "Compatibility alias: ${LEGACY_BINARY}"
 echo ""
 echo "Get started:"
-echo "  routeros-cli device add myrouter --address 192.168.88.1:8728 --username admin --password-stdin"
-echo "  routeros-cli device test"
-echo "  routeros-cli system info"
+echo "  echo 'password' | ros device add myrouter --address 192.168.88.1:8728 --username admin --password-stdin"
+echo "  ros device test"
+echo "  ros get system info"
+echo "  ros --read-only audit -o json"
 echo ""
 echo "Documentation: https://github.com/${REPO}"

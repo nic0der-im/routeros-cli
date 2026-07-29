@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -170,7 +171,7 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 			t.Errorf("device %q missing after roundtrip", name)
 			continue
 		}
-		if got != orig {
+		if !reflect.DeepEqual(got, orig) {
 			t.Errorf("device %q: want %+v, got %+v", name, orig, got)
 		}
 	}

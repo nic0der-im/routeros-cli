@@ -24,7 +24,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "routeros-cli %s\n  commit: %s\n  built:  %s\n", versionStr, commitStr, dateStr)
+			fmt.Fprintf(cmd.OutOrStdout(), "ros %s\n  commit: %s\n  built:  %s\n", versionStr, commitStr, dateStr)
 		},
 	}
 }

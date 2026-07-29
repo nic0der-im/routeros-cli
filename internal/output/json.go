@@ -14,8 +14,8 @@ type JSONResponse struct {
 
 // jsonErrorResponse is the envelope for error JSON output.
 type jsonErrorResponse struct {
-	OK    bool       `json:"ok"`
-	Error errorBody  `json:"error"`
+	OK    bool      `json:"ok"`
+	Error errorBody `json:"error"`
 }
 
 type errorBody struct {
@@ -24,26 +24,36 @@ type errorBody struct {
 	Device  string `json:"device"`
 }
 
-// RenderJSON writes data as a pretty-printed JSON envelope. Data is serialized
-// as an array of maps where each map uses the table headers as keys.
-func RenderJSON(w io.Writer, data Renderable, meta Meta) error {
-	headers := data.TableHeaders()
-	rows := data.TableRows()
+// RenderJSON writes data as a pretty-printed JSON envelope.
+func RenderJSON(w io.Writer, data Renderable, meta Meta, opts Options) error {
+	var payload interface{}
 
-	records := make([]map[string]string, 0, len(rows))
-	for _, row := range rows {
-		record := make(map[string]string, len(headers))
-		for i, h := range headers {
-			if i < len(row) {
-				record[h] = row[i]
-			}
+	if opts.Raw {
+		if raw, ok := data.(RawRenderable); ok {
+			payload = raw.RawRecords()
 		}
-		records = append(records, record)
+	}
+
+	if payload == nil {
+		headers := data.TableHeaders()
+		rows := data.TableRows()
+
+		records := make([]map[string]string, 0, len(rows))
+		for _, row := range rows {
+			record := make(map[string]string, len(headers))
+			for i, h := range headers {
+				if i < len(row) {
+					record[h] = row[i]
+				}
+			}
+			records = append(records, record)
+		}
+		payload = records
 	}
 
 	resp := JSONResponse{
 		OK:   true,
-		Data: records,
+		Data: payload,
 		Meta: meta,
 	}
 
@@ -63,6 +73,18 @@ func RenderError(w io.Writer, code, message, device string) error {
 		},
 	}
 
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(resp)
+}
+
+// RenderRawJSON writes an arbitrary payload inside the standard envelope.
+func RenderRawJSON(w io.Writer, data interface{}, meta Meta) error {
+	resp := JSONResponse{
+		OK:   true,
+		Data: data,
+		Meta: meta,
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(resp)

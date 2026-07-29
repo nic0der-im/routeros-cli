@@ -1,7 +1,14 @@
-# Binaries
-routeros-cli
+# Binaries (root only — do not ignore skills/ros/ or packs/ros/)
+/ros
+/routeros-cli
 *.exe
 dist/
+
+# AUR build debris
+aur/pkg/
+aur/src/
+aur/*.tar.gz
+aur/*.tar.zst
 
 # Go
 vendor/
@@ -15,3 +22,6 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local agent tooling cache
+.atl/

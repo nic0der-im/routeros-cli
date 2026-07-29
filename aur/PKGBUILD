@@ -1,0 +1,25 @@
+# Maintainer: Ignacio Medina <ignacionmedina1@gmail.com>
+pkgname=routeros-cli-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="CLI tool for managing MikroTik RouterOS routers (binary name: ros)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/nic0der-im/routeros-cli"
+license=('MIT')
+provides=('routeros-cli' 'ros')
+conflicts=('routeros-cli' 'ros')
+
+# NOTE: publish this PKGBUILD in a separate AUR git repo (not this tree).
+# After v0.2.0 release, update sha256sums from GitHub checksums file.
+
+source_x86_64=("${pkgname}-${pkgver}-x86_64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_amd64.tar.gz")
+source_aarch64=("${pkgname}-${pkgver}-aarch64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_arm64.tar.gz")
+
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    install -Dm755 ros "${pkgdir}/usr/bin/ros"
+    ln -s ros "${pkgdir}/usr/bin/routeros-cli"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

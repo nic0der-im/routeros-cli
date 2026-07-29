@@ -119,7 +119,7 @@ func TestRenderJSON(t *testing.T) {
 		Count:     2,
 	}
 
-	if err := RenderJSON(&buf, data, meta); err != nil {
+	if err := RenderJSON(&buf, data, meta, Options{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

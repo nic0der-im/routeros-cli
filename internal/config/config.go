@@ -1,5 +1,5 @@
-// Package config handles loading, saving, and validating the routeros-cli
-// TOML configuration file stored at ~/.config/routeros-cli/config.toml.
+// Package config handles loading, saving, and validating the ros
+// TOML configuration file stored at ~/.config/ros/config.toml.
 package config
 
 import (
@@ -11,7 +11,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the top-level configuration for routeros-cli.
+const (
+	appName     = "ros"
+	legacyApp   = "routeros-cli"
+)
+
+// Config is the top-level configuration for ros.
 type Config struct {
 	DefaultDevice string                  `toml:"default_device"`
 	DefaultOutput string                  `toml:"default_output"`
@@ -21,9 +26,12 @@ type Config struct {
 
 // DeviceConfig holds connection details for a single RouterOS device.
 type DeviceConfig struct {
-	Address  string `toml:"address"`
-	Username string `toml:"username"`
-	TLS      bool   `toml:"tls"`
+	Address  string   `toml:"address"`
+	Username string   `toml:"username"`
+	TLS      bool     `toml:"tls"`
+	ID       string   `toml:"id,omitempty"`
+	Tags     []string `toml:"tags,omitempty"`
+	Notes    string   `toml:"notes,omitempty"`
 }
 
 // TLSConfig holds TLS-related settings applied globally unless overridden.
@@ -39,17 +47,26 @@ var validOutputFormats = map[string]bool{
 }
 
 // DefaultPath returns the default configuration file path:
-// ~/.config/routeros-cli/config.toml
+// ~/.config/ros/config.toml (with automatic migration from routeros-cli).
 func DefaultPath() string {
+	home := homeDir()
+	return filepath.Join(home, ".config", appName, "config.toml")
+}
+
+// LegacyPath returns the previous config path for migration.
+func LegacyPath() string {
+	return filepath.Join(homeDir(), ".config", legacyApp, "config.toml")
+}
+
+func homeDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Fall back to HOME env or current directory as last resort.
 		home = os.Getenv("HOME")
 		if home == "" {
 			home = "."
 		}
 	}
-	return filepath.Join(home, ".config", "routeros-cli", "config.toml")
+	return home
 }
 
 // defaultConfig returns a Config populated with safe defaults.
@@ -61,14 +78,22 @@ func defaultConfig() *Config {
 }
 
 // Load reads a TOML configuration file from path. If the file does not exist,
-// a default configuration is created, written to disk, and returned.
+// it attempts migration from the legacy routeros-cli path, otherwise a default
+// configuration is created, written to disk, and returned.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("reading config: %w", err)
 		}
-		// File does not exist -- create a default.
+
+		// Try migrating from legacy path when loading the default location.
+		if path == DefaultPath() {
+			if migrated, mErr := migrateLegacy(path); mErr == nil && migrated != nil {
+				return migrated, nil
+			}
+		}
+
 		cfg := defaultConfig()
 		if err := cfg.Save(path); err != nil {
 			return nil, fmt.Errorf("creating default config: %w", err)
@@ -81,11 +106,29 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	// Ensure the Devices map is never nil even if the TOML file omits it.
 	if cfg.Devices == nil {
 		cfg.Devices = make(map[string]DeviceConfig)
 	}
 
+	return cfg, nil
+}
+
+func migrateLegacy(newPath string) (*Config, error) {
+	legacy := LegacyPath()
+	data, err := os.ReadFile(legacy)
+	if err != nil {
+		return nil, err
+	}
+	cfg := defaultConfig()
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	if cfg.Devices == nil {
+		cfg.Devices = make(map[string]DeviceConfig)
+	}
+	if err := cfg.Save(newPath); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -109,8 +152,7 @@ func (c *Config) Save(path string) error {
 	return nil
 }
 
-// Validate checks that the configuration values are acceptable. Currently it
-// ensures DefaultOutput is one of the supported formats ("table" or "json").
+// Validate checks that the configuration values are acceptable.
 func (c *Config) Validate() error {
 	if !validOutputFormats[c.DefaultOutput] {
 		return fmt.Errorf("invalid default_output %q: must be \"table\" or \"json\"", c.DefaultOutput)
@@ -118,8 +160,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// SetDefaultDevice sets the default device to name. It returns an error if
-// the named device does not exist in the Devices map.
+// SetDefaultDevice sets the default device to name.
 func (c *Config) SetDefaultDevice(name string) error {
 	if _, ok := c.Devices[name]; !ok {
 		return fmt.Errorf("device %q not found in configuration", name)
@@ -129,7 +170,6 @@ func (c *Config) SetDefaultDevice(name string) error {
 }
 
 // AddDevice adds a new device to the configuration under the given name.
-// It returns an error if a device with that name already exists.
 func (c *Config) AddDevice(name string, dev DeviceConfig) error {
 	if c.Devices == nil {
 		c.Devices = make(map[string]DeviceConfig)
@@ -141,9 +181,16 @@ func (c *Config) AddDevice(name string, dev DeviceConfig) error {
 	return nil
 }
 
-// RemoveDevice removes a device from the configuration. If the removed device
-// was the default, DefaultDevice is cleared. Returns an error if the device
-// does not exist.
+// UpdateDevice replaces an existing device configuration.
+func (c *Config) UpdateDevice(name string, dev DeviceConfig) error {
+	if _, ok := c.Devices[name]; !ok {
+		return fmt.Errorf("device %q not found", name)
+	}
+	c.Devices[name] = dev
+	return nil
+}
+
+// RemoveDevice removes a device from the configuration.
 func (c *Config) RemoveDevice(name string) error {
 	if _, ok := c.Devices[name]; !ok {
 		return fmt.Errorf("device %q not found", name)

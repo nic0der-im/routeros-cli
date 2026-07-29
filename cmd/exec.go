@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/rosapi"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +33,7 @@ Examples:
 				}
 
 				if len(result.Sentences) == 0 {
-					if a.OutFormat == "json" {
+					if a.OutFormat == output.FormatJSON {
 						return a.render(cmd.OutOrStdout(), &rosapi.GenericResults{}, deviceName, rosCmd)
 					}
 					fmt.Fprintln(cmd.OutOrStdout(), "OK (no data returned)")

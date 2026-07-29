@@ -7,7 +7,10 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const serviceName = "routeros-cli"
+const (
+	serviceName       = "ros"
+	legacyServiceName = "routeros-cli"
+)
 
 // ErrNotFound is returned when a credential does not exist in the store.
 var ErrNotFound = errors.New("credential not found")
@@ -29,12 +32,22 @@ func NewKeyringStore() *KeyringStore {
 
 func (s *KeyringStore) Get(deviceName string) (string, error) {
 	password, err := keyring.Get(serviceName, deviceName)
+	if err == nil {
+		return password, nil
+	}
+	if !errors.Is(err, keyring.ErrNotFound) {
+		return "", err
+	}
+
+	// Fall back to legacy service name and migrate on read.
+	password, err = keyring.Get(legacyServiceName, deviceName)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return "", ErrNotFound
 		}
 		return "", err
 	}
+	_ = keyring.Set(serviceName, deviceName, password)
 	return password, nil
 }
 
@@ -44,11 +57,16 @@ func (s *KeyringStore) Set(deviceName, password string) error {
 
 func (s *KeyringStore) Delete(deviceName string) error {
 	err := keyring.Delete(serviceName, deviceName)
-	if err != nil {
-		if errors.Is(err, keyring.ErrNotFound) {
-			return ErrNotFound
-		}
+	legacyErr := keyring.Delete(legacyServiceName, deviceName)
+
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
 		return err
+	}
+	if legacyErr != nil && !errors.Is(legacyErr, keyring.ErrNotFound) {
+		return legacyErr
+	}
+	if errors.Is(err, keyring.ErrNotFound) && errors.Is(legacyErr, keyring.ErrNotFound) {
+		return ErrNotFound
 	}
 	return nil
 }

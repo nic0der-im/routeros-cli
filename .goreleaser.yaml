@@ -1,11 +1,11 @@
 version: 2
 
-project_name: routeros-cli
+project_name: ros
 
 builds:
   - id: default
     main: .
-    binary: routeros-cli
+    binary: ros
     env:
       - CGO_ENABLED=0
     goos:
@@ -42,7 +42,8 @@ archives:
 #     description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
 #     license: "MIT"
 #     install: |
-#       bin.install "routeros-cli"
+#       bin.install "ros"
+#       bin.install_symlink "ros" => "routeros-cli"
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
