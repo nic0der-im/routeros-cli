@@ -622,18 +622,17 @@ Legacy `~/.config/routeros-cli/` is migrated automatically.
 - [x] Stable `apperr` kinds in JSON `error.code`
 - [x] Expanded domains + `nat` / `lease` helpers + richer `diag`
 - [x] Opt-in integration tests (`ROS_INTEGRATION_DEVICE`)
-- [x] Scoop + Chocolatey package templates
+- [x] Scoop bucket for Windows (`nic0der-im/scoop-bucket`)
+- [x] AUR package live (`routeros-cli-bin` 0.3.0)
 
-### Still maintainer-side / ongoing
+### Ongoing
 
-- [x] Push AUR package live (`routeros-cli-bin` on aur.archlinux.org) — v0.3.0
-- [x] Publish Scoop bucket (`nic0der-im/scoop-bucket`)
-- [ ] Publish Chocolatey.org package from [`chocolatey/`](chocolatey/) template
 - [ ] Expand capa linda further as field needs appear
 - [ ] Harden skill packs after more production apply workflows
 
-### Not planned soon
+### Backlog (low priority)
 
+- Chocolatey.org (Windows already covered by Scoop)
 - Emulating Winbox GUI parity end-to-end
 - Storing passwords in config files or CLI flags
 - Targeting RouterOS 6.x as a first-class platform
