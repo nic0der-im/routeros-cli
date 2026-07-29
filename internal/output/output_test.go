@@ -365,13 +365,25 @@ func TestRedactPayload_NestedAuditShape(t *testing.T) {
 			map[string]interface{}{"name": "wg0", "private-key": "AAAA"},
 		},
 	}
-	got := RedactPayload(payload).(map[string]interface{})
-	users := got["users"].([]map[string]string)
+	got, ok := RedactPayload(payload).(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map payload, got %T", RedactPayload(payload))
+	}
+	users, ok := got["users"].([]map[string]string)
+	if !ok || len(users) != 1 {
+		t.Fatalf("users: %#v", got["users"])
+	}
 	if users[0]["password"] != RedactedPlaceholder || users[0]["name"] != "admin" {
 		t.Fatalf("users: %#v", users[0])
 	}
-	ifaces := got["interfaces"].([]interface{})
-	rec := ifaces[0].(map[string]interface{})
+	ifaces, ok := got["interfaces"].([]interface{})
+	if !ok || len(ifaces) != 1 {
+		t.Fatalf("interfaces: %#v", got["interfaces"])
+	}
+	rec, ok := ifaces[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("iface elem: %#v", ifaces[0])
+	}
 	if rec["private-key"] != RedactedPlaceholder || rec["name"] != "wg0" {
 		t.Fatalf("interfaces: %#v", rec)
 	}
