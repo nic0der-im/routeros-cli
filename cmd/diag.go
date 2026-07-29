@@ -29,7 +29,7 @@ func newDiagLogCmd() *cobra.Command {
 		Use:   "log",
 		Short: "Show recent system log entries",
 		Run: func(cmd *cobra.Command, args []string) {
-			runGenericGet(cmd, []string{"/log"})
+			runGenericGet(cmd, []string{"/log"}, nil)
 		},
 	}
 }
@@ -42,7 +42,7 @@ func newDiagPingCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			params := []string{"/ping", "address=" + args[0], "count=" + strconv.Itoa(count)}
-			runGenericGet(cmd, params)
+			runGenericGet(cmd, params, nil)
 		},
 	}
 	cmd.Flags().IntVar(&count, "count", 4, "number of probes")
@@ -54,7 +54,7 @@ func newDiagNeighborsCmd() *cobra.Command {
 		Use:   "neighbors",
 		Short: "Show MNDP/CDP neighbors discovered by the router",
 		Run: func(cmd *cobra.Command, args []string) {
-			runGenericGet(cmd, []string{"/ip/neighbor"})
+			runGenericGet(cmd, []string{"/ip/neighbor"}, nil)
 		},
 	}
 }
@@ -67,7 +67,7 @@ func newDiagTracerouteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			params := []string{"/tool/traceroute", "address=" + args[0], "count=" + strconv.Itoa(count)}
-			runGenericGet(cmd, params)
+			runGenericGet(cmd, params, nil)
 		},
 	}
 	cmd.Flags().IntVar(&count, "count", 3, "probes per hop")
@@ -85,7 +85,7 @@ func newDiagTorchCmd() *cobra.Command {
 			if duration != "" {
 				params = append(params, "duration="+duration)
 			}
-			runGenericGet(cmd, params)
+			runGenericGet(cmd, params, nil)
 		},
 	}
 	cmd.Flags().StringVar(&iface, "interface", "", "interface name")

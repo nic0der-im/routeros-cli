@@ -31,6 +31,9 @@ Profiles:
   full     system, interfaces, IP, routes, DNS, firewall, DHCP, users, services (default)
   network  interfaces, IP addresses, routes, DNS, DHCP
   security firewall, users, IP services, identity
+  hygiene  cloud DDNS, on-router .backup clutter, iface drop counters,
+           FastTrack flags, services leftovers, DHCP lease hygiene
+           (skips /tool/profile by default)
 
 Human output is a compact summary (highlights only). PPPoE/PPP/L2TP dynamic
 interfaces and their addresses are omitted by default (ISP-scale friendly);
@@ -54,7 +57,7 @@ Use --skip-cpu-profile to skip that sample. Use -o json for full raw maps.`,
 				}
 
 				if a.OutFormat == output.FormatJSON {
-					return output.RenderRawJSON(cmd.OutOrStdout(), sections, meta)
+					return output.RenderRawJSON(cmd.OutOrStdout(), sections, meta, output.Options{Raw: a.RawJSON})
 				}
 
 				return renderAuditHuman(cmd.OutOrStdout(), deviceName, profile, order, sections, showPPP)
@@ -62,14 +65,35 @@ Use --skip-cpu-profile to skip that sample. Use -o json for full raw maps.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&profile, "profile", "full", "audit profile: full, network, or security")
+	cmd.Flags().StringVar(&profile, "profile", "full", "audit profile: full, network, security, or hygiene")
 	cmd.Flags().BoolVar(&showPPP, "show-ppp", false, "include PPPoE/PPP/L2TP interfaces and addresses in the human summary")
 	cmd.Flags().BoolVar(&skipCPUProfile, "skip-cpu-profile", false, "skip /tool/profile CPU sample (faster)")
 	cmd.Flags().IntVar(&cpuProfileSec, "cpu-profile-sec", 3, "seconds to sample for top CPU processes")
 	return cmd
 }
 
+// auditProfiles lists valid --profile values (empty string is treated as full).
+func auditProfiles() []string {
+	return []string{"full", "network", "security", "hygiene"}
+}
+
+func validateAuditProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	for _, p := range auditProfiles() {
+		if profile == p {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown audit profile %q (valid: %s)", profile, strings.Join(auditProfiles(), ", "))
+}
+
 func collectAudit(ctx context.Context, c client.Client, profile string, cpuProfile bool, cpuProfileSec int) ([]string, map[string]interface{}, error) {
+	if err := validateAuditProfile(profile); err != nil {
+		return nil, nil, err
+	}
+
 	type sectionSpec struct {
 		key string
 		cmd string
@@ -110,8 +134,18 @@ func collectAudit(ctx context.Context, c client.Client, profile string, cpuProfi
 			{"firewall_filter", "/ip/firewall/filter/print"},
 			{"firewall_nat", "/ip/firewall/nat/print"},
 		}
-	default:
-		return nil, nil, fmt.Errorf("unknown audit profile %q (valid: full, network, security)", profile)
+	case "hygiene":
+		// Compact optimization snapshot; skips CPU sample and PPP listing.
+		specs = []sectionSpec{
+			{"system_resource", "/system/resource/print"},
+			{"system_identity", "/system/identity/print"},
+			{"ip_cloud", "/ip/cloud/print"},
+			{"files", "/file/print"},
+			{"interfaces", "/interface/print"},
+			{"ip_settings", "/ip/settings/print"},
+			{"services", "/ip/service/print"},
+			{"dhcp_leases", "/ip/dhcp-server/lease/print"},
+		}
 	}
 
 	order := make([]string, 0, len(specs)+2)
@@ -126,6 +160,7 @@ func collectAudit(ctx context.Context, c client.Client, profile string, cpuProfi
 	}
 
 	// Best-effort PPP session count (ISP routers); ignore if package/path missing.
+	// Hygiene stays compact — no PPP section.
 	switch profile {
 	case "full", "", "network":
 		if result, err := c.Run(ctx, "/ppp/active/print"); err == nil {
@@ -135,6 +170,7 @@ func collectAudit(ctx context.Context, c client.Client, profile string, cpuProfi
 	}
 
 	// Short CPU profile sample for top processes (no per-process RAM on RouterOS API).
+	// Hygiene always skips /tool/profile (faster; low-RAM boards).
 	if cpuProfile && (profile == "full" || profile == "" || profile == "security") {
 		if cpuProfileSec < 1 {
 			cpuProfileSec = 3
@@ -162,14 +198,25 @@ func renderAuditHuman(w io.Writer, deviceName, profile string, order []string, s
 		printSection(w, "top cpu", "sampled via /tool/profile (per-process RAM N/A on RouterOS API)", summarizeCPUProfile(rows), width)
 	}
 
+	hygiene := profile == "hygiene"
 	for _, name := range order {
 		rows := asRows(sections[name])
 		switch name {
 		case "system_resource", "system_identity", "cpu_profile":
 			continue
+		case "ip_cloud":
+			printSection(w, "ip cloud", "no secrets", summarizeCloud(rows), width)
+		case "files":
+			printSection(w, "backup files", "on-router *.backup", summarizeBackupFiles(rows), width)
+		case "ip_settings":
+			printSection(w, "ip settings", "fast-path / FastTrack", summarizeIPSettings(rows), width)
 		case "interfaces":
-			lines, meta := summarizeInterfaces(rows, showPPP)
-			printSection(w, "interfaces", meta, lines, width)
+			if hygiene {
+				printSection(w, "iface errors", "running ifaces with non-zero drops", summarizeIfaceErrors(rows), width)
+			} else {
+				lines, meta := summarizeInterfaces(rows, showPPP)
+				printSection(w, "interfaces", meta, lines, width)
+			}
 		case "ip_addresses":
 			lines, meta := summarizeAddresses(rows, showPPP)
 			printSection(w, "addresses", meta, lines, width)
@@ -182,7 +229,11 @@ func renderAuditHuman(w io.Writer, deviceName, profile string, order []string, s
 		case "firewall_nat":
 			printSection(w, "firewall nat", "", summarizeNAT(rows), width)
 		case "dhcp_leases":
-			printSection(w, "dhcp leases", "", summarizeLeases(rows), width)
+			if hygiene {
+				printSection(w, "dhcp hygiene", "", summarizeLeaseHygiene(rows), width)
+			} else {
+				printSection(w, "dhcp leases", "", summarizeLeases(rows), width)
+			}
 		case "dhcp_servers":
 			printSection(w, "dhcp servers", "", summarizeDHCPServers(rows), width)
 		case "ppp_active":
@@ -193,12 +244,182 @@ func renderAuditHuman(w io.Writer, deviceName, profile string, order []string, s
 		case "users":
 			printSection(w, "users", "", summarizeUsers(rows), width)
 		case "services":
-			printSection(w, "services", "enabled only", summarizeServices(rows), width)
+			if hygiene {
+				printSection(w, "services", "enabled + disabled mgmt leftovers", summarizeServicesHygiene(rows), width)
+			} else {
+				printSection(w, "services", "enabled only", summarizeServices(rows), width)
+			}
 		default:
 			printSection(w, name, fmt.Sprintf("%d item(s)", len(rows)), nil, width)
 		}
 	}
+
+	// FINDINGS footer: hygiene always; full when cheap (no extra API calls).
+	if hygiene || profile == "full" || profile == "" {
+		if lines := deriveFindings(sections); len(lines) > 0 {
+			printSection(w, "findings", "", lines, width)
+		}
+	}
 	return nil
+}
+
+// deriveFindings builds short actionable warn/ok/info lines from already-fetched
+// audit section maps. No extra RouterOS calls.
+func deriveFindings(sections map[string]interface{}) []string {
+	var out []string
+
+	if res := firstRow(sections["system_resource"]); res != nil {
+		if bb := val(res, "bad-blocks"); bb != "" {
+			if n, err := strconv.ParseFloat(bb, 64); err == nil {
+				if n > 0 {
+					out = append(out, fmt.Sprintf("warn: bad-blocks %s%% — check flash / replace storage", bb))
+				} else {
+					out = append(out, "ok: bad-blocks 0")
+				}
+			}
+		}
+	}
+
+	if _, hasFiles := sections["files"]; hasFiles {
+		n := countBackupFiles(asRows(sections["files"]))
+		switch {
+		case n > 1:
+			out = append(out, fmt.Sprintf("warn: %d *.backup on router — file list; remove stale via file remove", n))
+		case n == 1:
+			out = append(out, "ok: 1 *.backup on router")
+		default:
+			out = append(out, "ok: no *.backup clutter")
+		}
+	}
+
+	if _, hasIfaces := sections["interfaces"]; hasIfaces {
+		if names := notableDropIfaces(asRows(sections["interfaces"])); len(names) > 0 {
+			out = append(out, "warn: iface drops (TX-QUEUE-DROP/…) on "+strings.Join(names, ", ")+" — inspect get interface")
+		} else {
+			out = append(out, "ok: no notable iface drops")
+		}
+	}
+
+	if settings := firstRow(sections["ip_settings"]); settings != nil {
+		allow := isTrue(settings, "allow-fast-path")
+		ft := strings.ToLower(val(settings, "ipv4-fasttrack-active"))
+		ftActive := ft == "true" || ft == "yes"
+		switch {
+		case allow && !ftActive && ft != "":
+			out = append(out, "info: allow-fast-path true but FastTrack inactive — check filter FastTrack rules")
+		case allow && ftActive:
+			out = append(out, "ok: FastTrack active")
+		case allow && ft == "":
+			// Flag missing; skip noise.
+		}
+	}
+
+	if _, hasLeases := sections["dhcp_leases"]; hasLeases {
+		waiting, dups := leaseHygieneCounts(asRows(sections["dhcp_leases"]))
+		if waiting > 0 {
+			out = append(out, fmt.Sprintf("warn: %d waiting DHCP lease(s) — delete dhcp/lease or lease cleanup-waiting", waiting))
+		}
+		if dups > 0 {
+			out = append(out, "warn: same-MAC multi-lease (see DHCP HYGIENE) — delete stale dhcp/lease")
+		}
+		if waiting == 0 && dups == 0 {
+			out = append(out, "ok: DHCP leases clean")
+		}
+	}
+
+	if _, hasSvc := sections["services"]; hasSvc {
+		if danger := enabledDangerousServices(asRows(sections["services"])); len(danger) > 0 {
+			out = append(out, "warn: dangerous services enabled: "+strings.Join(danger, ",")+" — set /ip/service disabled=yes")
+		} else {
+			out = append(out, "ok: no dangerous cleartext services")
+		}
+	}
+
+	if cloud := firstRow(sections["ip_cloud"]); cloud != nil {
+		ddns := strings.ToLower(val(cloud, "ddns-enabled"))
+		status := strings.ToLower(val(cloud, "status"))
+		warning := strings.ToLower(val(cloud, "warning"))
+		ddnsOn := ddns == "yes" || ddns == "true"
+		natHint := warning != "" ||
+			strings.Contains(status, "nat") ||
+			strings.Contains(warning, "nat") ||
+			strings.Contains(status, "warn")
+		if ddnsOn && natHint {
+			out = append(out, "warn: cloud DDNS behind NAT/status warning — set /ip/cloud ddns-enabled=auto (ROS≥7.17)")
+		} else if ddnsOn {
+			out = append(out, "ok: cloud DDNS enabled (no NAT warning)")
+		} else if ddns != "" {
+			out = append(out, "ok: cloud DDNS not forced on")
+		}
+	}
+
+	return out
+}
+
+func countBackupFiles(rows []map[string]string) int {
+	n := 0
+	for _, r := range rows {
+		if strings.HasSuffix(strings.ToLower(val(r, "name")), ".backup") {
+			n++
+		}
+	}
+	return n
+}
+
+func notableDropIfaces(rows []map[string]string) []string {
+	var names []string
+	for _, r := range rows {
+		if !isTrue(r, "running") {
+			continue
+		}
+		_, hasRX := counterNonZero(r, "rx-drop")
+		_, hasTX := counterNonZero(r, "tx-drop")
+		_, hasTQ := counterNonZero(r, "tx-queue-drop")
+		if hasRX || hasTX || hasTQ {
+			names = append(names, val(r, "name"))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func leaseHygieneCounts(rows []map[string]string) (waiting, dupMACs int) {
+	macCount := map[string]int{}
+	for _, r := range rows {
+		if strings.EqualFold(val(r, "status"), "waiting") {
+			waiting++
+		}
+		mac := strings.ToLower(val(r, "mac-address"))
+		if mac == "" {
+			continue
+		}
+		macCount[mac]++
+	}
+	for _, n := range macCount {
+		if n >= 2 {
+			dupMACs++
+		}
+	}
+	return waiting, dupMACs
+}
+
+var dangerousServiceNames = map[string]bool{
+	"telnet": true, "ftp": true, "www": true,
+}
+
+func enabledDangerousServices(rows []map[string]string) []string {
+	var out []string
+	for _, r := range rows {
+		name := strings.ToLower(val(r, "name"))
+		if !dangerousServiceNames[name] {
+			continue
+		}
+		if !isTrue(r, "disabled") {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func printSystemBlock(w io.Writer, id, res map[string]string) {
@@ -645,4 +866,166 @@ func summarizeServices(rows []map[string]string) []string {
 		return []string{"(all services disabled)"}
 	}
 	return alignColumns(table)
+}
+
+// managementServiceNames are IP services often left enabled by mistake (or
+// intentionally disabled leftovers worth noting in hygiene).
+var managementServiceNames = map[string]bool{
+	"ftp": true, "telnet": true, "www": true, "www-ssl": true,
+	"api": true, "api-ssl": true, "winbox": true, "ssh": true,
+}
+
+func summarizeServicesHygiene(rows []map[string]string) []string {
+	out := summarizeServices(rows)
+	var disabled []string
+	for _, r := range rows {
+		name := strings.ToLower(val(r, "name"))
+		if !managementServiceNames[name] {
+			continue
+		}
+		if isTrue(r, "disabled") {
+			disabled = append(disabled, name)
+		}
+	}
+	sort.Strings(disabled)
+	if len(disabled) > 0 {
+		out = append(out, "disabled mgmt: "+strings.Join(disabled, ", "))
+	}
+	return out
+}
+
+func summarizeCloud(rows []map[string]string) []string {
+	if len(rows) == 0 {
+		return []string{"(no /ip/cloud data)"}
+	}
+	r := rows[0]
+	table := [][]string{
+		{"DDNS", "UPDATE-TIME", "STATUS"},
+		{val(r, "ddns-enabled"), val(r, "update-time"), val(r, "status")},
+	}
+	out := alignColumns(table)
+	// Optional non-secret status fields when present.
+	extra := [][]string{}
+	if pa := val(r, "public-address"); pa != "" {
+		extra = append(extra, []string{"public-address", pa})
+	}
+	if dn := val(r, "dns-name"); dn != "" {
+		extra = append(extra, []string{"dns-name", dn})
+	}
+	if len(extra) > 0 {
+		out = append(out, alignColumns(extra)...)
+	}
+	return out
+}
+
+func summarizeBackupFiles(rows []map[string]string) []string {
+	table := [][]string{{"NAME", "SIZE"}}
+	for _, r := range rows {
+		name := val(r, "name")
+		if !strings.HasSuffix(strings.ToLower(name), ".backup") {
+			continue
+		}
+		size := val(r, "size")
+		if size == "" {
+			size = "?"
+		} else {
+			size = formatBytes(size)
+		}
+		table = append(table, []string{name, size})
+	}
+	if len(table) == 1 {
+		return []string{"(no .backup files on router)"}
+	}
+	return alignColumns(table)
+}
+
+func counterNonZero(row map[string]string, key string) (string, bool) {
+	raw := val(row, key)
+	if raw == "" {
+		return "", false
+	}
+	n, err := strconv.ParseFloat(raw, 64)
+	if err != nil || n == 0 {
+		return "", false
+	}
+	return raw, true
+}
+
+func summarizeIfaceErrors(rows []map[string]string) []string {
+	table := [][]string{{"NAME", "RX-DROP", "TX-DROP", "TX-QUEUE-DROP"}}
+	for _, r := range rows {
+		if !isTrue(r, "running") {
+			continue
+		}
+		rx, hasRX := counterNonZero(r, "rx-drop")
+		tx, hasTX := counterNonZero(r, "tx-drop")
+		tq, hasTQ := counterNonZero(r, "tx-queue-drop")
+		if !hasRX && !hasTX && !hasTQ {
+			continue
+		}
+		if !hasRX {
+			rx = "0"
+		}
+		if !hasTX {
+			tx = "0"
+		}
+		if !hasTQ {
+			tq = "0"
+		}
+		table = append(table, []string{val(r, "name"), rx, tx, tq})
+	}
+	if len(table) == 1 {
+		return []string{"(no notable drops on running interfaces)"}
+	}
+	return alignColumns(table)
+}
+
+func summarizeIPSettings(rows []map[string]string) []string {
+	if len(rows) == 0 {
+		return []string{"(no /ip/settings data)"}
+	}
+	r := rows[0]
+	keys := []string{
+		"allow-fast-path",
+		"ipv4-fast-path-active",
+		"ipv4-fasttrack-active",
+		"ipv6-fast-path-active",
+	}
+	table := [][]string{{"FLAG", "VALUE"}}
+	for _, k := range keys {
+		if v := val(r, k); v != "" {
+			table = append(table, []string{k, v})
+		}
+	}
+	if len(table) == 1 {
+		return []string{"(no fast-path / FastTrack flags present)"}
+	}
+	return alignColumns(table)
+}
+
+func summarizeLeaseHygiene(rows []map[string]string) []string {
+	var waiting int
+	macCount := map[string]int{}
+	for _, r := range rows {
+		if strings.EqualFold(val(r, "status"), "waiting") {
+			waiting++
+		}
+		mac := strings.ToLower(val(r, "mac-address"))
+		if mac == "" {
+			continue
+		}
+		macCount[mac]++
+	}
+	out := []string{fmt.Sprintf("%d waiting lease(s)", waiting)}
+	var dups []string
+	for mac, n := range macCount {
+		if n >= 2 {
+			dups = append(dups, fmt.Sprintf("%s (%d)", mac, n))
+		}
+	}
+	sort.Strings(dups)
+	if len(dups) > 0 {
+		out = append(out, "warn: same MAC on 2+ leases: "+strings.Join(dups, ", "))
+	}
+	return out
 }

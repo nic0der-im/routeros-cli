@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/domains"
 	"github.com/nic0der-im/routeros-cli/internal/session"
 )
 
@@ -47,7 +49,8 @@ func normalizePath(path string) string {
 	for strings.Contains(path, "//") {
 		path = strings.ReplaceAll(path, "//", "/")
 	}
-	return strings.TrimSuffix(path, "/")
+	// Strip trailing /print|/get so get …/print does not become …/print/print.
+	return domains.StripTrailingReadAction(path)
 }
 
 func pathCommand(path, action string) string {
@@ -97,6 +100,32 @@ func recordIDChange(a *App, deviceName, command string, args []string, inverse [
 		Inverse: inverse,
 		Note:    note,
 	})
+}
+
+// parseWhereFilters converts --where key=value flags into RouterOS query args (?key=value).
+// Avoids shell glob issues with ?=name=x. Accepts key=value, ?key=value, or ?=key=value.
+func parseWhereFilters(wheres []string) ([]string, error) {
+	out := make([]string, 0, len(wheres))
+	for _, w := range wheres {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(w, "?="):
+			out = append(out, w)
+		case strings.HasPrefix(w, "?"):
+			out = append(out, w)
+		default:
+			idx := strings.IndexByte(w, '=')
+			if idx <= 0 {
+				return nil, fmt.Errorf("--where requires key=value, got %q", w)
+			}
+			key, val := w[:idx], w[idx+1:]
+			out = append(out, "?"+key+"="+val)
+		}
+	}
+	return out, nil
 }
 
 // findIDArg extracts .id= value from parsed args.

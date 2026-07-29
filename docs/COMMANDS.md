@@ -23,13 +23,14 @@ ros -d DEV get|create|set|delete|enable|disable <domain|/path> [params...]
 
 - **Curated aliases:** `ros domains`
 - **Raw path:** any RouterOS API path, e.g. `/ip/firewall/filter`
-- **Params:** `key=value` → `=key=value`; filters `?=key=value`; ids `.id=*N`
+- **Params:** `key=value` → `=key=value`; filters `?=key=value` or `--where key=value`; ids `.id=*N`
 
 Examples:
 
 ```sh
 ros -d router-edge get user
 ros -d router-edge get /ip/firewall/filter
+ros -d router-edge get interface --where name=ether1
 ros -d router-edge get firewall/nat -o json --raw
 ros -d router-edge create firewall/address-list list=blacklist address=1.2.3.4
 ros -d router-edge set dhcp/server .id=*1 lease-time=1d
@@ -76,13 +77,20 @@ Bundled packs: `ros` (read/audit) and `ros-safe-apply` (writes via safe sessions
 ## Sessions / agents
 
 ```
-ros --read-only audit --profile full|network|security [--show-ppp] [--skip-cpu-profile]
-# Human: boxed column tables; iface RX/TX = cumulative bytes; PPPoE omitted unless --show-ppp; -o json = full raw maps
+ros --read-only audit --profile full|network|security|hygiene [--show-ppp] [--skip-cpu-profile]
+# Human: boxed column tables; iface RX/TX = cumulative bytes; PPPoE omitted unless --show-ppp; -o json redacts secrets unless --raw
+# hygiene: cloud DDNS, *.backup clutter, iface drops, FastTrack flags, services leftovers, DHCP lease hygiene (skips CPU sample)
+# hygiene/full human ends with FINDINGS (warn/ok hints; no auto-apply)
+ros --read-only doctor
+# Alias of audit --profile hygiene with FINDINGS; exit 0 even when warnings present
 ros session begin|commit|rollback|status|watch
+ros file list
 ros file get <name> [--output ./local] [--via sftp|auto|api|ftp] [--ephemeral-ssh]
+ros file remove <name-or-id>
 ros backup export [--file ./local.rsc] [--via sftp|auto|api|ftp] [--ephemeral-ssh]
 ros backup binary [--file name] [--output ./dir]
     [--via sftp|auto|api|ftp] [--source-ip CIDR] [--ephemeral-ssh]
+# Default binary --file is UTC ros-backup-YYYYMMDD-HHMMSS (avoids overwrite)
 
 # Text export: /export file=… on router + SFTP download (API stream is often empty)
 ros -d router-edge backup export --file ~/edge.rsc
@@ -91,9 +99,12 @@ ros -d router-edge backup export --file ~/edge.rsc --ephemeral-ssh=false   # LAN
 # Binary backup download (default --via sftp):
 # 1) /system/backup/save  2) detect local+public IP  3) temporarily merge into
 #    /ip/service ssh address  4) SFTP get  5) always restore previous SSH state
+ros -d router-edge backup binary --output ~/backups/   # timestamped remote name
 ros -d router-edge backup binary --file nightly --output ~/backups/
 ros -d router-edge backup binary --output ~/backups/ --ephemeral-ssh=false
+ros -d router-edge file list
 ros -d router-edge file get nightly.backup --via api   # text files with API contents only
+ros -d router-edge file remove stale.backup
 ros nat set-out-interface --id '*1' --interface ether1
 ros lease cleanup-waiting [--dry-run]
 ```

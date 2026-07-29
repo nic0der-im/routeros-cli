@@ -10,6 +10,7 @@ import (
 )
 
 func newGetCmd() *cobra.Command {
+	var where []string
 	cmd := &cobra.Command{
 		Use:   "get [domain|/path] [params...]",
 		Short: "Read resources (kubectl-style or raw API path)",
@@ -25,9 +26,17 @@ Generic (any API path or alias from 'ros domains'):
   ros get user
   ros get radius
   ros get interface/bridge
-  ros get log`,
-		Run: runGenericGet,
+  ros get log
+
+Filters (--where works on curated and generic get):
+  ros get interface --where name=ether1
+  ros get firewall/filter --where chain=forward --where disabled=false
+  ros get /interface --where name=ether1`,
+		Run: func(cmd *cobra.Command, args []string) {
+			runGenericGet(cmd, args, where)
+		},
 	}
+	cmd.PersistentFlags().StringArrayVar(&where, "where", nil, "RouterOS query filter key=value (repeatable; becomes ?key=value)")
 	cmd.AddCommand(
 		newGetSystemCmd(),
 		newGetInterfaceCmd(),
@@ -37,6 +46,24 @@ Generic (any API path or alias from 'ros domains'):
 	)
 	return cmd
 }
+
+// whereQueryArgs reads inherited --where flags for curated get subcommands.
+func whereQueryArgs(cmd *cobra.Command) ([]string, error) {
+	wheres, err := cmd.Flags().GetStringArray("where")
+	if err != nil {
+		return nil, err
+	}
+	return parseWhereFilters(wheres)
+}
+
+func runPrint(ctx context.Context, c client.Client, path string, cmd *cobra.Command) (*client.Result, error) {
+	filters, err := whereQueryArgs(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return c.Run(ctx, path, filters...)
+}
+
 
 func newGetSystemCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -81,7 +108,7 @@ func newGetInterfaceCmd() *cobra.Command {
 		Short: "List interfaces",
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/interface/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-				result, err := c.Run(ctx, "/interface/print")
+				result, err := runPrint(ctx, c, "/interface/print", cmd)
 				if err != nil {
 					return fmt.Errorf("listing interfaces: %w", err)
 				}
@@ -106,7 +133,7 @@ func newGetIPCmd() *cobra.Command {
 			Short: "List IP addresses",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/address/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/address/print")
+					result, err := runPrint(ctx, c, "/ip/address/print", cmd)
 					if err != nil {
 						return fmt.Errorf("listing IP addresses: %w", err)
 					}
@@ -123,7 +150,7 @@ func newGetIPCmd() *cobra.Command {
 			Short: "List IP routes",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/route/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/route/print")
+					result, err := runPrint(ctx, c, "/ip/route/print", cmd)
 					if err != nil {
 						return fmt.Errorf("listing IP routes: %w", err)
 					}
@@ -140,7 +167,7 @@ func newGetIPCmd() *cobra.Command {
 			Short: "Show DNS settings",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/dns/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/dns/print")
+					result, err := runPrint(ctx, c, "/ip/dns/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching DNS settings: %w", err)
 					}
@@ -167,7 +194,7 @@ func newGetFirewallCmd() *cobra.Command {
 			Short: "List firewall filter rules",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/firewall/filter/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/firewall/filter/print")
+					result, err := runPrint(ctx, c, "/ip/firewall/filter/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching filter rules: %w", err)
 					}
@@ -184,7 +211,7 @@ func newGetFirewallCmd() *cobra.Command {
 			Short: "List firewall NAT rules",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/firewall/nat/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/firewall/nat/print")
+					result, err := runPrint(ctx, c, "/ip/firewall/nat/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching NAT rules: %w", err)
 					}
@@ -211,7 +238,7 @@ func newGetDHCPCmd() *cobra.Command {
 			Short: "List DHCP leases",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/dhcp-server/lease/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/dhcp-server/lease/print")
+					result, err := runPrint(ctx, c, "/ip/dhcp-server/lease/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching DHCP leases: %w", err)
 					}
@@ -228,7 +255,7 @@ func newGetDHCPCmd() *cobra.Command {
 			Short: "List DHCP servers",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/dhcp-server/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/dhcp-server/print")
+					result, err := runPrint(ctx, c, "/ip/dhcp-server/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching DHCP servers: %w", err)
 					}
@@ -245,7 +272,7 @@ func newGetDHCPCmd() *cobra.Command {
 			Short: "List IP pools",
 			Run: func(cmd *cobra.Command, args []string) {
 				runWithClient(cmd, "/ip/pool/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-					result, err := c.Run(ctx, "/ip/pool/print")
+					result, err := runPrint(ctx, c, "/ip/pool/print", cmd)
 					if err != nil {
 						return fmt.Errorf("fetching IP pools: %w", err)
 					}

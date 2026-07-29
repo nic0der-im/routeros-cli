@@ -17,8 +17,11 @@ func newSetCmd() *cobra.Command {
 
   ros set identity --name "central-hub-buenos-aires"
   ros set /ip/dhcp-server .id=*1 lease-time=1d
+  ros set /ip/cloud ddns-enabled=auto update-time=false
   ros set user .id=*2 password=secret
-  ros set firewall/nat .id=*1 out-interface=ether1`,
+  ros set firewall/nat .id=*1 out-interface=ether1
+
+Singleton menus (no .id) are journaled in safe sessions via a pre-/print snapshot.`,
 		Run: runGenericSet,
 	}
 	cmd.AddCommand(newSetIdentityCmd())

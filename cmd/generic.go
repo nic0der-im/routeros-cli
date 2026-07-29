@@ -65,7 +65,7 @@ func newDomainsCmd() *cobra.Command {
 	}
 }
 
-func runGenericGet(cmd *cobra.Command, args []string) {
+func runGenericGet(cmd *cobra.Command, args []string, where []string) {
 	if len(args) == 0 {
 		_ = cmd.Help()
 		return
@@ -80,6 +80,12 @@ func runGenericGet(cmd *cobra.Command, args []string) {
 		rosCmd = "/ping"
 	}
 	apiArgs := parseAPIArgs(rest)
+	filters, err := parseWhereFilters(where)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
+		return
+	}
+	apiArgs = append(apiArgs, filters...)
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
 		result, err := c.Run(ctx, rosCmd, apiArgs...)
 		if err != nil {
@@ -138,26 +144,36 @@ func runGenericSet(cmd *cobra.Command, args []string) {
 	}
 	rosCmd := pathCommand(path, "set")
 	apiArgs := parseAPIArgs(rest)
+	apiArgs, tip, err := normalizeCloudDDNSArgs(path, apiArgs)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
+		return
+	}
+	if tip != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), tip)
+	}
 	id := findIDArg(apiArgs)
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
 		if err := a.ensureWritable(rosCmd); err != nil {
 			return err
 		}
-		var pre map[string]string
-		if id != "" {
-			pre, _ = fetchPreState(ctx, c, path, id)
-		}
+		// Snapshot pre-state for both row sets (.id) and singleton menus (no .id).
+		pre, _ := fetchPreState(ctx, c, path, id)
 		_, err := c.Run(ctx, rosCmd, apiArgs...)
 		if err != nil {
 			return err
 		}
 		if inv := session.BuildSetInverse(rosCmd, id, pre, apiArgs); len(inv) > 0 {
+			note := "set singleton"
+			if id != "" {
+				note = "set " + id
+			}
 			_ = a.recordSafeChange(deviceName, session.Change{
 				Command:  rosCmd,
 				Args:     apiArgs,
 				Inverse:  inv,
 				PreState: pre,
-				Note:     "set " + id,
+				Note:     note,
 			})
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Updated %s on %s\n", path, deviceName)

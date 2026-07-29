@@ -14,8 +14,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultBackupName = "routeros-cli-backup"
 const defaultExportName = "ros-export"
+
+// defaultBinaryBackupName returns a UTC timestamped on-router backup basename
+// (without .backup), e.g. ros-backup-20260729-170815.
+func defaultBinaryBackupName(t time.Time) string {
+	return t.UTC().Format("ros-backup-20060102-150405")
+}
 
 func newBackupCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -165,6 +170,10 @@ func newBackupBinaryCmd() *cobra.Command {
 		Short: "Create a binary backup on the router (optionally download it)",
 		Long: `Create a binary backup file on the router via /system/backup/save.
 
+Default --file is a UTC timestamp: ros-backup-YYYYMMDD-HHMMSS (avoids
+overwriting a previous on-router backup). Pass --file explicitly to reuse
+a fixed name.
+
 With --output, ros downloads the .backup locally. Default transport is SFTP:
 the CLI detects its local/public IP, temporarily merges it into the router's
 SSH allowlist, downloads over SFTP, then restores the previous SSH service
@@ -177,12 +186,16 @@ explicitly required (not recommended).`,
 				if err := a.ensureWritable("/system/backup/save"); err != nil {
 					return err
 				}
-				_, err := c.Run(ctx, "/system/backup/save", "=name="+backupName)
+				name := backupName
+				if name == "" {
+					name = defaultBinaryBackupName(time.Now())
+				}
+				_, err := c.Run(ctx, "/system/backup/save", "=name="+name)
 				if err != nil {
 					return fmt.Errorf("creating binary backup on %q: %w", deviceName, err)
 				}
 
-				fileName := backupName + ".backup"
+				fileName := name + ".backup"
 				result, err := c.Run(ctx, "/file/print", "?name="+fileName)
 				if err != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "Backup %q created on %q (verification query failed: %v)\n", fileName, deviceName, err)
@@ -234,7 +247,7 @@ explicitly required (not recommended).`,
 		},
 	}
 
-	cmd.Flags().StringVar(&backupName, "file", defaultBackupName, "backup name on the router (without .backup extension)")
+	cmd.Flags().StringVar(&backupName, "file", "", "backup name on the router without .backup (default: ros-backup-YYYYMMDD-HHMMSS UTC)")
 	cmd.Flags().StringVar(&outputPath, "output", "", "local path or directory to download the .backup")
 	cmd.Flags().StringVar(&via, "via", "sftp", "download via: sftp|auto|api|ftp")
 	cmd.Flags().StringVar(&sourceIP, "source-ip", "", "override detected IP for ephemeral SSH allowlist (CIDR or IP)")

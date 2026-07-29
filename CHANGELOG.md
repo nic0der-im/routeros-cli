@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-29
+
+### Added
+- `audit --profile hygiene` (cloud, backup files, iface drops, FastTrack flags, DHCP lease hygiene) with **FINDINGS** footer; `ros doctor` alias
+- `file list` / `file remove`; timestamped default `backup binary` remote name
+- Domain aliases for cloud, logging, scheduler, health, ip/settings, firewall connection, discovery-settings, bandwidth-server, `interface/list`, `interface/list/member`
+- `get --where key=value` (repeatable, curated + generic) → RouterOS `?key=value` query filters
+- Skill packs **0.4.0** (hygiene checklist, ROS ≥7.17 cloud `yes|auto`, secret caution)
+
+### Changed
+- Strip trailing `/print`|/get` on get/set/delete path normalize
+- Redact known secret fields in table, default JSON, and audit `-o json` (`--raw` shows secrets)
+- `set ip/cloud`: reject `ddns-enabled=no`; normalize `ddns-enabled=false` → `auto` with stderr tip
+- Safe-session journals singleton `/set` (e.g. `/ip/cloud`) without `.id`
+
 ## [0.3.3] — 2026-07-29
 
 ### Changed

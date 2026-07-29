@@ -14,7 +14,7 @@ type mockRenderable struct {
 }
 
 func (m *mockRenderable) TableHeaders() []string { return m.headers }
-func (m *mockRenderable) TableRows() [][]string   { return m.rows }
+func (m *mockRenderable) TableRows() [][]string  { return m.rows }
 
 func newMockData() *mockRenderable {
 	return &mockRenderable{
@@ -239,5 +239,165 @@ func TestRender_UnknownFormat(t *testing.T) {
 	err := Render(&buf, Format("yaml"), data, meta)
 	if err == nil {
 		t.Fatal("expected error for unknown format, got nil")
+	}
+}
+
+// mockRawRenderable implements Renderable + RawRenderable for secret tests.
+type mockRawRenderable struct {
+	headers []string
+	rows    [][]string
+	raw     []map[string]string
+}
+
+func (m *mockRawRenderable) TableHeaders() []string          { return m.headers }
+func (m *mockRawRenderable) TableRows() [][]string           { return m.rows }
+func (m *mockRawRenderable) RawRecords() []map[string]string { return m.raw }
+
+func TestIsSecretKey(t *testing.T) {
+	for _, k := range []string{"private-key", "PRIVATE-KEY", "password", "pre-shared-key", "preshared-key", "shared-secret", "secret", "wpa2-pre-shared-key", "passphrase"} {
+		if !IsSecretKey(k) {
+			t.Errorf("expected secret key %q", k)
+		}
+	}
+	if IsSecretKey("name") || IsSecretKey("public-key") {
+		t.Fatal("name/public-key should not be secret keys")
+	}
+}
+
+func TestRedactRecord(t *testing.T) {
+	got := RedactRecord(map[string]string{
+		"name":        "wg0",
+		"private-key": "supersecret",
+		"public-key":  "pubkey",
+		"password":    "hunter2",
+	})
+	if got["private-key"] != RedactedPlaceholder {
+		t.Fatalf("private-key: %q", got["private-key"])
+	}
+	if got["password"] != RedactedPlaceholder {
+		t.Fatalf("password: %q", got["password"])
+	}
+	if got["name"] != "wg0" || got["public-key"] != "pubkey" {
+		t.Fatalf("non-secrets changed: %#v", got)
+	}
+	if RedactValue("password", "") != "" {
+		t.Fatal("empty secret should stay empty")
+	}
+}
+
+func TestRenderTable_RedactsSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	data := &mockRenderable{
+		headers: []string{"name", "private-key", "public-key"},
+		rows:    [][]string{{"wg0", "AAAA", "BBBB"}},
+	}
+	if err := RenderTable(&buf, data); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "AAAA") {
+		t.Fatalf("table leaked private-key: %s", out)
+	}
+	if !strings.Contains(out, RedactedPlaceholder) {
+		t.Fatalf("expected placeholder in table: %s", out)
+	}
+	if !strings.Contains(out, "BBBB") {
+		t.Fatalf("public-key should remain: %s", out)
+	}
+}
+
+func TestRenderJSON_RedactsSecretsByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	data := &mockRawRenderable{
+		headers: []string{"name", "private-key"},
+		rows:    [][]string{{"wg0", "SECRET"}},
+		raw:     []map[string]string{{"name": "wg0", "private-key": "SECRET", ".id": "*1"}},
+	}
+	meta := Meta{Device: "r1", Command: "/interface/wireguard/print", Count: 1}
+	if err := RenderJSON(&buf, data, meta, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "SECRET") {
+		t.Fatalf("default JSON leaked secret: %s", buf.String())
+	}
+	var resp JSONResponse
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	records, ok := resp.Data.([]interface{})
+	if !ok || len(records) != 1 {
+		t.Fatalf("data: %#v", resp.Data)
+	}
+	rec, ok := records[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("record: %#v", records[0])
+	}
+	if rec["private-key"] != RedactedPlaceholder {
+		t.Fatalf("private-key=%v want %q", rec["private-key"], RedactedPlaceholder)
+	}
+}
+
+func TestRenderJSON_RawShowsSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	data := &mockRawRenderable{
+		headers: []string{"name", "private-key"},
+		rows:    [][]string{{"wg0", "SECRET"}},
+		raw:     []map[string]string{{"name": "wg0", "private-key": "SECRET", ".id": "*1"}},
+	}
+	meta := Meta{Device: "r1", Command: "test", Count: 1}
+	if err := RenderJSON(&buf, data, meta, Options{Raw: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "SECRET") {
+		t.Fatalf("--raw should show secrets: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), ".id") {
+		t.Fatalf("--raw should include .id: %s", buf.String())
+	}
+}
+
+func TestRedactPayload_NestedAuditShape(t *testing.T) {
+	payload := map[string]interface{}{
+		"users": []map[string]string{
+			{"name": "admin", "password": "hunter2"},
+		},
+		"interfaces": []interface{}{
+			map[string]interface{}{"name": "wg0", "private-key": "AAAA"},
+		},
+	}
+	got := RedactPayload(payload).(map[string]interface{})
+	users := got["users"].([]map[string]string)
+	if users[0]["password"] != RedactedPlaceholder || users[0]["name"] != "admin" {
+		t.Fatalf("users: %#v", users[0])
+	}
+	ifaces := got["interfaces"].([]interface{})
+	rec := ifaces[0].(map[string]interface{})
+	if rec["private-key"] != RedactedPlaceholder || rec["name"] != "wg0" {
+		t.Fatalf("interfaces: %#v", rec)
+	}
+}
+
+func TestRenderRawJSON_RedactsByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	sections := map[string]interface{}{
+		"users": []map[string]string{{"name": "admin", "password": "hunter2"}},
+	}
+	meta := Meta{Device: "r1", Command: "audit", Count: 1}
+	if err := RenderRawJSON(&buf, sections, meta); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "hunter2") {
+		t.Fatalf("audit JSON leaked password: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), RedactedPlaceholder) {
+		t.Fatalf("expected placeholder: %s", buf.String())
+	}
+
+	buf.Reset()
+	if err := RenderRawJSON(&buf, sections, meta, Options{Raw: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "hunter2") {
+		t.Fatalf("--raw should keep password: %s", buf.String())
 	}
 }

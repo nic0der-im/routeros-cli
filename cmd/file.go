@@ -17,9 +17,36 @@ func newFileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "file",
 		Short: "Work with files on the router",
+		Long: `List, download, or remove files on the router.
+
+  ros file list
+  ros file get <name> [--output ./local]
+  ros file remove <name-or-id>`,
 	}
-	cmd.AddCommand(newFileGetCmd())
+	cmd.AddCommand(
+		newFileListCmd(),
+		newFileGetCmd(),
+		newFileRemoveCmd(),
+	)
 	return cmd
+}
+
+func newFileListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List files on the router (/file/print)",
+		Long:  `List files via /file/print. Output is table or JSON like other get commands.`,
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			runWithClient(cmd, "/file/print", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				result, err := c.Run(ctx, "/file/print")
+				if err != nil {
+					return fmt.Errorf("listing files: %w", err)
+				}
+				return renderGenericResult(a, cmd.OutOrStdout(), result, deviceName, "/file/print")
+			})
+		},
+	}
 }
 
 func newFileGetCmd() *cobra.Command {
@@ -80,6 +107,44 @@ merge into /ip/service ssh address, SFTP the file, restore previous SSH state.`,
 	cmd.Flags().StringVar(&publicIPURL, "public-ip-url", publicip.DefaultURL, "HTTPS URL that returns the caller public IP")
 	cmd.Flags().BoolVar(&ephemeralSSH, "ephemeral-ssh", true, "temporarily whitelist caller IPs on SSH for SFTP, then restore")
 	return cmd
+}
+
+func newFileRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove <name-or-id>",
+		Short: "Remove a file on the router (/file/remove)",
+		Long: `Remove a RouterOS file by name or .id.
+
+  ros file remove stale.backup
+  ros file remove '*A'
+
+Names use =numbers=<name> (same as backup cleanup). Values that look like
+RouterOS ids (start with *) use =.id=.`,
+		Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			target := args[0]
+			runWithClient(cmd, "/file/remove", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				if err := a.ensureWritable("/file/remove"); err != nil {
+					return err
+				}
+				apiArg := fileRemoveArg(target)
+				_, err := c.Run(ctx, "/file/remove", apiArg)
+				if err != nil {
+					return fmt.Errorf("removing file %q: %w", target, err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Removed file %q on %s\n", target, deviceName)
+				return nil
+			})
+		},
+	}
+}
+
+// fileRemoveArg builds the RouterOS /file/remove argument for a name or .id.
+func fileRemoveArg(nameOrID string) string {
+	if strings.HasPrefix(nameOrID, "*") {
+		return "=.id=" + nameOrID
+	}
+	return "=numbers=" + nameOrID
 }
 
 func hostOnly(address string) string {

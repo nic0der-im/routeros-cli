@@ -223,7 +223,7 @@ These are the everyday reads you will use most. Device name `router-edge` is a p
 
 ### Audit (human)
 
-`audit` pulls a structured snapshot so agents (and humans) do not need a full `/export`. Profiles: `full`, `network`, `security`.
+`audit` pulls a structured snapshot so agents (and humans) do not need a full `/export`. Profiles: `full`, `network`, `security`, and `hygiene`.
 
 Human mode is a **compact boxed summary**: SYSTEM (memory/storage in MB/GB), optional TOP CPU (`/tool/profile`), then column-aligned tables for running interfaces, addresses, routes, DNS, firewall, DHCP, users, and services. Each section closes with a long `└────` bar.
 
@@ -231,8 +231,11 @@ Interface **RX/TX** are cumulative byte counters from the API (`rx-byte` / `tx-b
 
 PPPoE/PPP/L2TP dynamic interfaces (and their addresses) are **hidden by default** so ISP boxes stay readable. Use `--show-ppp` to list them; PPP active sessions appear as a count unless `--show-ppp` is set. Skip the CPU sample with `--skip-cpu-profile` for a faster run.
 
+Use `--profile hygiene` for a compact optimization pass: Cloud DDNS flags, on-router `*.backup` clutter, running-iface drop counters, FastTrack/fast-path flags, enabled services plus disabled management leftovers, and DHCP waiting/duplicate-MAC hints (always skips `/tool/profile`).
+
 ```sh
 ros -d router-edge --read-only audit --profile full
+ros -d router-edge --read-only audit --profile hygiene   # cloud / backups / drops / FastTrack / DHCP hygiene
 ros -d router-edge --read-only audit --show-ppp           # include PPPoE ifaces / session names
 ros -d router-edge --read-only audit --skip-cpu-profile   # skip /tool/profile sample
 ```

@@ -75,7 +75,7 @@ func init() {
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	pf.BoolVar(&flagNoColor, "no-color", false, "disable color output")
 	pf.BoolVar(&flagReadOnly, "read-only", false, "refuse all write commands (also: ROS_READ_ONLY=1)")
-	pf.BoolVar(&flagRawJSON, "raw", false, "include raw RouterOS fields in JSON output")
+	pf.BoolVar(&flagRawJSON, "raw", false, "include raw RouterOS fields in JSON (secrets unredacted)")
 }
 
 // loadApp initializes the App from flags and config.
@@ -204,6 +204,7 @@ func Execute() error {
 		newExecCmd(),
 		newSchemaCmd(),
 		newAuditCmd(),
+		newDoctorCmd(),
 		newSessionCmd(),
 		newGetCmd(),
 		newCreateCmd(),
@@ -274,13 +275,20 @@ func (a *App) recordSafeChange(deviceName string, change session.Change) error {
 	return a.Sessions.AppendChange(sess, change)
 }
 
-// fetchPreState prints a single row by .id for journaling.
+// fetchPreState prints a row for journaling.
+// When id is set, filters with ?.id=. When id is empty (singleton menus),
+// prints the parent path and uses the first sentence.
 func fetchPreState(ctx context.Context, c client.Client, basePath, id string) (map[string]string, error) {
-	if id == "" {
-		return nil, nil
-	}
 	printCmd := normalizePath(basePath) + "/print"
-	result, err := c.Run(ctx, printCmd, "?.id="+id)
+	var (
+		result *client.Result
+		err    error
+	)
+	if id == "" {
+		result, err = c.Run(ctx, printCmd)
+	} else {
+		result, err = c.Run(ctx, printCmd, "?.id="+id)
+	}
 	if err != nil {
 		return nil, err
 	}

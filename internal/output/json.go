@@ -25,11 +25,14 @@ type errorBody struct {
 }
 
 // RenderJSON writes data as a pretty-printed JSON envelope.
+// Without Raw, known secret values are redacted (agent-safe default).
+// With Raw + RawRenderable, full RouterOS maps are emitted including secrets.
 func RenderJSON(w io.Writer, data Renderable, meta Meta, opts Options) error {
 	var payload interface{}
 
 	if opts.Raw {
 		if raw, ok := data.(RawRenderable); ok {
+			// Escape hatch: --raw shows unredacted secret fields.
 			payload = raw.RawRecords()
 		}
 	}
@@ -43,7 +46,7 @@ func RenderJSON(w io.Writer, data Renderable, meta Meta, opts Options) error {
 			record := make(map[string]string, len(headers))
 			for i, h := range headers {
 				if i < len(row) {
-					record[h] = row[i]
+					record[h] = RedactValue(h, row[i])
 				}
 			}
 			records = append(records, record)
@@ -79,10 +82,21 @@ func RenderError(w io.Writer, code, message, device string) error {
 }
 
 // RenderRawJSON writes an arbitrary payload inside the standard envelope.
-func RenderRawJSON(w io.Writer, data interface{}, meta Meta) error {
+// Without Raw, known secret fields nested in maps/slices are redacted (same
+// agent-safe default as RenderJSON). Pass Options{Raw: true} (--raw) to keep
+// secrets (e.g. WireGuard private-key in audit JSON).
+func RenderRawJSON(w io.Writer, data interface{}, meta Meta, opts ...Options) error {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	payload := data
+	if !o.Raw {
+		payload = RedactPayload(data)
+	}
 	resp := JSONResponse{
 		OK:   true,
-		Data: data,
+		Data: payload,
 		Meta: meta,
 	}
 	enc := json.NewEncoder(w)

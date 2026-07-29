@@ -155,6 +155,47 @@ func TestBuildSetAndRemoveInverse(t *testing.T) {
 	}
 }
 
+func TestBuildSetInverseSingleton(t *testing.T) {
+	pre := map[string]string{
+		"ddns-enabled": "yes",
+		"update-time":  "true",
+		"public-address": "1.2.3.4",
+		"status":       "updated",
+	}
+	inv := BuildSetInverse("/ip/cloud/set", "", pre, []string{
+		"=ddns-enabled=auto",
+		"=update-time=false",
+	})
+	if len(inv) < 3 || inv[0] != "/ip/cloud/set" {
+		t.Fatalf("singleton inverse: %v", inv)
+	}
+	for _, a := range inv {
+		if strings.HasPrefix(a, "=.id=") || strings.HasPrefix(a, "=id=") {
+			t.Fatalf("singleton inverse must not include .id: %v", inv)
+		}
+	}
+	want := map[string]bool{"=ddns-enabled=yes": false, "=update-time=true": false}
+	for _, a := range inv[1:] {
+		if _, ok := want[a]; ok {
+			want[a] = true
+		}
+	}
+	for a, ok := range want {
+		if !ok {
+			t.Fatalf("missing restored arg %s in %v", a, inv)
+		}
+	}
+
+	// No matching pre-state keys → nil
+	if BuildSetInverse("/ip/cloud/set", "", pre, []string{"=unknown-prop=x"}) != nil {
+		t.Fatal("expected nil when no changed keys exist in pre-state")
+	}
+	// Empty id with nil pre-state → nil
+	if BuildSetInverse("/ip/cloud/set", "", nil, []string{"=ddns-enabled=auto"}) != nil {
+		t.Fatal("expected nil for nil pre-state")
+	}
+}
+
 func TestSafeFalseStillActiveButNotJournaledViaAppendStillWorks(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

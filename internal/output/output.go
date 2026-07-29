@@ -17,7 +17,12 @@ const (
 
 // Options controls optional rendering behavior.
 type Options struct {
-	Raw bool // when true and data implements RawRenderable, include raw fields
+	// Raw, when true and data implements RawRenderable, includes all RouterOS
+	// fields in JSON (including .id). Secret keys are still redacted in table
+	// output always; in JSON they are shown only when Raw is true (escape hatch
+	// for operators who need the real values). Prefer default (Raw=false) for
+	// agent-safe dumps.
+	Raw bool
 }
 
 // ParseFormat converts a string to a Format, returning an error for unknown values.

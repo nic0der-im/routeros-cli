@@ -9,7 +9,7 @@ import (
 
 // RenderTable writes data as a human-readable table using text/tabwriter.
 // Headers are printed in ALL CAPS. Columns are tab-separated with minwidth=0,
-// tabwidth=4, and padding=2.
+// tabwidth=4, and padding=2. Known secret columns are always redacted.
 func RenderTable(w io.Writer, data Renderable) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 
@@ -23,7 +23,15 @@ func RenderTable(w io.Writer, data Renderable) error {
 	}
 
 	for _, row := range data.TableRows() {
-		if _, err := fmt.Fprintln(tw, strings.Join(row, "\t")); err != nil {
+		redacted := make([]string, len(row))
+		for i, cell := range row {
+			key := ""
+			if i < len(headers) {
+				key = headers[i]
+			}
+			redacted[i] = RedactValue(key, cell)
+		}
+		if _, err := fmt.Fprintln(tw, strings.Join(redacted, "\t")); err != nil {
 			return err
 		}
 	}

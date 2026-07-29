@@ -6,7 +6,8 @@ ros -d DEV [--read-only] [-o json] [--raw] VERB DOMAIN|PATH [params...]
 
 Verbs: `get` `create` `set` `delete` `enable` `disable`  
 Domains: run `ros domains`  
-Params: `key=value`, `.id=*N`, filters `?=key=value`
+Params: `key=value`, `.id=*N`, filters `?=key=value`  
+Paths: base menus only — do **not** append `/print` or `/get` (`ros get` adds print).
 
 ## Inventory
 
@@ -23,10 +24,30 @@ ros device import --from winbox [--dry-run] [--with-passwords]
 
 ```sh
 export ROS_READ_ONLY=1 ROS_DEFAULT_OUTPUT=json
-ros -d DEV audit --profile full
-ros -d DEV get firewall/filter --raw
+ros -d DEV audit --profile full          # also: network|security|hygiene
+ros -d DEV doctor                        # hygiene + FINDINGS footer (human)
+ros -d DEV audit --skip-cpu-profile      # low-RAM / faster iteration
+ros -d DEV audit --show-ppp              # include PPPoE/PPP in human summary
+ros -d DEV get firewall/filter           # prefer without --raw (secrets redacted)
+ros -d DEV get ip/cloud
 ros -d DEV get user
+ros -d DEV file list
 ```
+
+Human audit: boxed columns; iface RX/TX = cumulative bytes (not live Mbps).  
+`--raw` / unredacted secrets: avoid for WireGuard `private-key` and passwords.
+
+## Files / backup
+
+```sh
+ros -d DEV file list
+ros -d DEV file get NAME.backup --output ./local/
+ros -d DEV file remove stale.backup
+ros -d DEV backup binary --output ./backups/   # default remote name ros-backup-YYYYMMDD-HHMMSS UTC
+ros -d DEV backup export --file ./DEV.rsc
+```
+
+LAN with SSH already allowlisted: add `--ephemeral-ssh=false` on SFTP downloads.
 
 ## Safe write path
 

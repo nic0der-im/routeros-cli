@@ -20,71 +20,121 @@ var Alias = map[string]string{
 	"user/group":            "/user/group",
 
 	// P1
-	"interface":              "/interface",
-	"interface/ethernet":     "/interface/ethernet",
-	"interface/wireguard":    "/interface/wireguard",
+	"interface":                 "/interface",
+	"interface/ethernet":        "/interface/ethernet",
+	"interface/list":            "/interface/list",
+	"interface/list/member":     "/interface/list/member",
+	"interface/wireguard":       "/interface/wireguard",
 	"interface/wireguard/peers": "/interface/wireguard/peers",
-	"service":                "/ip/service",
-	"ip/service":             "/ip/service",
-	"dhcp-client":            "/ip/dhcp-client",
-	"ip/dhcp-client":         "/ip/dhcp-client",
-	"firewall/mangle":        "/ip/firewall/mangle",
-	"firewall/raw":           "/ip/firewall/raw",
-	"system/identity":        "/system/identity",
-	"system/clock":           "/system/clock",
-	"system/ntp/client":      "/system/ntp/client",
-	"system/package":         "/system/package",
-	"system/resource":        "/system/resource",
-	"radius":                 "/radius",
-	"ppp/secret":             "/ppp/secret",
-	"ppp/profile":            "/ppp/profile",
-	"queue/simple":           "/queue/simple",
-	"queue/tree":             "/queue/tree",
-	"certificate":            "/certificate",
-	"routing/filter":         "/routing/filter",
-	"routing/rule":           "/routing/rule",
-	"routing/bgp":            "/routing/bgp",
-	"interface/wifi":         "/interface/wifi",
-	"interface/wireless":     "/interface/wireless",
-	"interface/wifiwave2":    "/interface/wifiwave2",
-	"container":              "/container",
-	"container/config":       "/container/config",
-	"container/envs":         "/container/envs",
-	"container/mounts":       "/container/mounts",
-	"tool/bandwidth-test":    "/tool/bandwidth-test",
-	"tool/traceroute":        "/tool/traceroute",
+	"service":                   "/ip/service",
+	"ip/service":                "/ip/service",
+	"dhcp-client":               "/ip/dhcp-client",
+	"ip/dhcp-client":            "/ip/dhcp-client",
+	"firewall/mangle":           "/ip/firewall/mangle",
+	"firewall/raw":              "/ip/firewall/raw",
+	"system/identity":           "/system/identity",
+	"system/clock":              "/system/clock",
+	"system/ntp/client":         "/system/ntp/client",
+	"system/package":            "/system/package",
+	"system/resource":           "/system/resource",
+	"radius":                    "/radius",
+	"ppp/secret":                "/ppp/secret",
+	"ppp/profile":               "/ppp/profile",
+	"queue/simple":              "/queue/simple",
+	"queue/tree":                "/queue/tree",
+	"certificate":               "/certificate",
+	"routing/filter":            "/routing/filter",
+	"routing/rule":              "/routing/rule",
+	"routing/bgp":               "/routing/bgp",
+	"interface/wifi":            "/interface/wifi",
+	"interface/wireless":        "/interface/wireless",
+	"interface/wifiwave2":       "/interface/wifiwave2",
+	"container":                 "/container",
+	"container/config":          "/container/config",
+	"container/envs":            "/container/envs",
+	"container/mounts":          "/container/mounts",
+	"tool/bandwidth-test":       "/tool/bandwidth-test",
+	"tool/traceroute":           "/tool/traceroute",
+	"tool/bandwidth-server":     "/tool/bandwidth-server",
+
+	// Cloud / settings / hygiene
+	"ip/cloud":                       "/ip/cloud",
+	"ip/settings":                    "/ip/settings",
+	"ip/neighbor/discovery-settings": "/ip/neighbor/discovery-settings",
+	"firewall/connection":            "/ip/firewall/connection",
+	"system/logging":                 "/system/logging",
+	"system/scheduler":               "/system/scheduler",
+	"system/script":                  "/system/script",
+	"system/health":                  "/system/health", // may be empty on some boards
 
 	// L2
-	"interface/bridge":         "/interface/bridge",
-	"interface/bridge/port":    "/interface/bridge/port",
-	"interface/vlan":           "/interface/vlan",
-	"interface/bonding":        "/interface/bonding",
+	"interface/bridge":      "/interface/bridge",
+	"interface/bridge/port": "/interface/bridge/port",
+	"interface/vlan":        "/interface/vlan",
+	"interface/bonding":     "/interface/bonding",
 
 	// Diag
-	"log":           "/log",
-	"tool/ping":     "/ping", // special: /ping
-	"ping":          "/ping",
-	"tool/torch":    "/tool/torch",
-	"ip/neighbor":   "/ip/neighbor",
-	"file":          "/file",
+	"log":         "/log",
+	"tool/ping":   "/ping", // special: /ping
+	"ping":        "/ping",
+	"tool/torch":  "/tool/torch",
+	"ip/neighbor": "/ip/neighbor",
+	"file":        "/file",
+}
+
+// StripTrailingReadAction removes one trailing /print or /get (case-insensitive)
+// from an API base path. Agents and humans often paste Winbox/terminal paths that
+// already include the read action; get/create/set append their own action, so
+// leaving /print would produce …/print/print. Pass base paths only.
+func StripTrailingReadAction(path string) string {
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	if path == "" {
+		return path
+	}
+	lower := strings.ToLower(path)
+	for _, suffix := range []string{"/print", "/get"} {
+		if strings.HasSuffix(lower, suffix) {
+			stripped := path[:len(path)-len(suffix)]
+			if stripped != "" {
+				return stripped
+			}
+		}
+	}
+	return path
+}
+
+// stripFriendlyReadAction removes a trailing print/get segment from a friendly key.
+func stripFriendlyReadAction(key string) string {
+	lower := strings.ToLower(key)
+	for _, suffix := range []string{"/print", "/get"} {
+		if strings.HasSuffix(lower, suffix) {
+			stripped := key[:len(key)-len(suffix)]
+			if stripped != "" {
+				return stripped
+			}
+		}
+	}
+	return key
 }
 
 // Resolve turns a friendly name or raw path into a normalized API base path.
+// Trailing /print or /get is stripped so get/exec callers can paste full read paths.
 func Resolve(nameOrPath string) (string, bool) {
 	s := strings.TrimSpace(nameOrPath)
 	if s == "" {
 		return "", false
 	}
 	if strings.HasPrefix(s, "/") {
-		return strings.TrimSuffix(s, "/"), true
+		return StripTrailingReadAction(s), true
 	}
 	key := strings.Trim(strings.ReplaceAll(s, " ", "/"), "/")
 	key = strings.ToLower(key)
+	key = stripFriendlyReadAction(key)
 	if p, ok := Alias[key]; ok {
 		return p, true
 	}
 	// try without normalizing case on last segment
-	if p, ok := Alias[strings.Trim(s, "/")]; ok {
+	if p, ok := Alias[stripFriendlyReadAction(strings.Trim(s, "/"))]; ok {
 		return p, true
 	}
 	return "", false

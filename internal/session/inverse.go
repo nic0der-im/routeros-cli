@@ -20,11 +20,15 @@ func IsReadOnlyField(key string) bool {
 
 // BuildSetInverse restores previously changed properties via /set.
 // changedArgs are the =key=value pairs from the original set (excluding .id).
+// When id is empty (singleton menus like /ip/cloud), the inverse omits =.id=.
 func BuildSetInverse(setCommand, id string, preState map[string]string, changedArgs []string) []string {
-	if id == "" || !endsWith(setCommand, "/set") || preState == nil {
+	if !endsWith(setCommand, "/set") || preState == nil {
 		return nil
 	}
-	inv := []string{setCommand, "=.id=" + id}
+	inv := []string{setCommand}
+	if id != "" {
+		inv = append(inv, "=.id="+id)
+	}
 	for _, a := range changedArgs {
 		key, ok := argKey(a)
 		if !ok || key == ".id" || key == "id" {
@@ -34,7 +38,11 @@ func BuildSetInverse(setCommand, id string, preState map[string]string, changedA
 			inv = append(inv, "="+key+"="+old)
 		}
 	}
-	if len(inv) <= 2 {
+	minLen := 1 // command only (singleton)
+	if id != "" {
+		minLen = 2 // command + .id
+	}
+	if len(inv) <= minLen {
 		return nil
 	}
 	return inv
