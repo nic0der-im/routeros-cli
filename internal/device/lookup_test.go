@@ -6,7 +6,7 @@ func TestLookupByID(t *testing.T) {
 	inv := newTestInventory(t)
 	dev := sampleDevice("192.168.1.1:8728")
 	dev.ID = "eoc-frontera"
-	if err := inv.Add("EOC FRONTERA", dev); err != nil {
+	if err := inv.Add("central hub BA", dev); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -14,7 +14,7 @@ func TestLookupByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
 	}
-	if name != "EOC FRONTERA" {
+	if name != "central hub BA" {
 		t.Errorf("name = %q", name)
 	}
 	if got.ID != "eoc-frontera" {

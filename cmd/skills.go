@@ -116,7 +116,7 @@ func newSkillsInstallCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "\nSkills installed. Reload the agent session if skills are cached.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Try: \"Audit device home with ros in read-only mode\"")
+			fmt.Fprintln(cmd.OutOrStdout(), "Try: \"Audit device router-edge with ros in read-only mode\"")
 			return nil
 		},
 	}

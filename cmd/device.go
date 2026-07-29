@@ -56,7 +56,7 @@ Two modes:
 
   Interactive (human, TTY):
     ros device add
-    ros device add "EOC FRONTERA"
+    ros device add "central-hub-buenos-aires"
     Prompts for name, host, port, username, password, TLS, and optional fields.
 
   Agentic / scripted (non-interactive):

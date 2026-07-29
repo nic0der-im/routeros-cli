@@ -13,7 +13,7 @@ func TestSanitizeName(t *testing.T) {
 		in, want string
 	}{
 		{"", "device"},
-		{"EOC FRONTERA", "EOC-FRONTERA"},
+		{"central hub BA", "central-hub-BA"},
 		{"lab/router", "lab-router"},
 		{"@@@", "device"},
 		{"  office-1  ", "office-1"},

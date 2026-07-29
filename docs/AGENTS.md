@@ -39,8 +39,8 @@ export ROS_DEFAULT_OUTPUT=json
 
 ## Typical prompts
 
-- "Audit `home` with ros and propose optimizations (read-only)."
-- "Using ros-safe-apply, set DHCP lease-time to 1d on home inside a safe session."
+- "Audit `router-edge` with ros and propose optimizations (read-only)."
+- "Using ros-safe-apply, set DHCP lease-time to 1d on router-edge inside a safe session."
 
 ## Manual docs
 

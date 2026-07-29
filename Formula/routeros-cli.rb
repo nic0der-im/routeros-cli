@@ -34,10 +34,10 @@ class Ros < Formula
   def caveats
     <<~EOS
       To get started, add a router:
-        echo 'password' | ros device add myrouter --address 192.168.88.1:8728 --username admin --password-stdin
+        echo 'password' | ros device add router-edge --address 192.168.88.1:8728 --username admin --password-stdin
 
       Agent read-only audit:
-        ros -d myrouter --read-only audit -o json
+        ros -d router-edge --read-only audit -o json
 
       Enable shell completions:
         ros completion zsh > $(brew --prefix)/share/zsh/site-functions/_ros

@@ -32,7 +32,7 @@ func testApp(t *testing.T) (*App, *client.MockClient) {
 				TLS:      false,
 				ID:       "lab-router",
 			},
-			"EOC FRONTERA": {
+			"central hub BA": {
 				Address:  "10.0.0.1:8728",
 				Username: "admin",
 				TLS:      false,
@@ -52,7 +52,7 @@ func testApp(t *testing.T) (*App, *client.MockClient) {
 
 	creds := credential.NewMemoryStore()
 	_ = creds.Set("lab", "secret")
-	_ = creds.Set("EOC FRONTERA", "secret")
+	_ = creds.Set("central hub BA", "secret")
 
 	mock := client.NewMockClient()
 	app := &App{

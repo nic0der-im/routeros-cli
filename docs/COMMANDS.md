@@ -28,14 +28,14 @@ ros -d DEV get|create|set|delete|enable|disable <domain|/path> [params...]
 Examples:
 
 ```sh
-ros -d home get user
-ros -d home get /ip/firewall/filter
-ros -d home get firewall/nat -o json --raw
-ros -d home create firewall/address-list list=blacklist address=1.2.3.4
-ros -d home set dhcp/server .id=*1 lease-time=1d
-ros -d home delete dhcp/lease .id=*F9
-ros -d home enable interface .id=*E
-ros -d home disable interface/wireguard .id=*E
+ros -d router-edge get user
+ros -d router-edge get /ip/firewall/filter
+ros -d router-edge get firewall/nat -o json --raw
+ros -d router-edge create firewall/address-list list=blacklist address=1.2.3.4
+ros -d router-edge set dhcp/server .id=*1 lease-time=1d
+ros -d router-edge delete dhcp/lease .id=*F9
+ros -d router-edge enable interface .id=*E
+ros -d router-edge disable interface/wireguard .id=*E
 ```
 
 ## Device inventory

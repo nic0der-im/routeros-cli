@@ -12,7 +12,7 @@ func TestBeginCommit(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 
-	sess, err := store.Begin("EOC FRONTERA", true)
+	sess, err := store.Begin("central hub BA", true)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestBeginCommit(t *testing.T) {
 		t.Error("expected safe=true")
 	}
 
-	active, err := store.Active("EOC FRONTERA")
+	active, err := store.Active("central hub BA")
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestBeginCommit(t *testing.T) {
 		t.Errorf("status = %q", reloaded.Status)
 	}
 
-	active, err = store.Active("EOC FRONTERA")
+	active, err = store.Active("central hub BA")
 	if err != nil {
 		t.Fatalf("Active after commit: %v", err)
 	}
@@ -114,8 +114,8 @@ func TestBuildInverse(t *testing.T) {
 }
 
 func TestSanitize(t *testing.T) {
-	got := sanitize("EOC FRONTERA")
-	if got != "EOC_FRONTERA" {
+	got := sanitize("central hub BA")
+	if got != "central_hub_BA" {
 		t.Errorf("sanitize = %q", got)
 	}
 	_ = filepath.Join // keep import used if needed

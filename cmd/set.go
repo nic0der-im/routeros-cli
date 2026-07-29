@@ -14,7 +14,7 @@ func newSetCmd() *cobra.Command {
 		Short: "Update resources (kubectl-style or raw API path)",
 		Long: `Update RouterOS resources.
 
-  ros set identity --name "EOC FRONTERA"
+  ros set identity --name "central-hub-buenos-aires"
   ros set /ip/dhcp-server .id=*1 lease-time=1d
   ros set user .id=*2 password=secret
   ros set firewall/nat .id=*1 out-interface=ether1`,

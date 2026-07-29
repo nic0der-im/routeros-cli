@@ -1,6 +1,6 @@
 ---
 name: ros
-description: "Trigger: ros, routeros-cli, MikroTik, RouterOS, audit router, EOC, device inventory, read-only agent. Use ros CLI safely for inventory, audit, and read queries."
+description: "Trigger: ros, routeros-cli, MikroTik, RouterOS, audit router, device inventory, read-only agent. Use ros CLI safely for inventory, audit, and read queries."
 license: MIT
 metadata:
   author: nic0der-im
@@ -9,7 +9,7 @@ metadata:
 
 ## Activation Contract
 
-Load when the user asks to inspect, audit, optimize, or query MikroTik RouterOS via `ros` / `routeros-cli`, or names a device from inventory (e.g. "EOC FRONTERA", `home`).
+Load when the user asks to inspect, audit, optimize, or query MikroTik RouterOS via `ros` / `routeros-cli`, or names a device from inventory (e.g. `router-edge`, `central-hub-buenos-aires`).
 
 ## Hard Rules
 
