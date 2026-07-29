@@ -1,6 +1,6 @@
 # Maintainer: Ignacio Medina <ignacionmedina1@gmail.com>
 pkgname=routeros-cli-bin
-pkgver=0.3.3
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="CLI tool for managing MikroTik RouterOS routers (binary name: ros)"
 arch=('x86_64' 'aarch64')
@@ -12,8 +12,8 @@ conflicts=('routeros-cli' 'ros')
 source_x86_64=("${pkgname}-${pkgver}-x86_64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_amd64.tar.gz")
 source_aarch64=("${pkgname}-${pkgver}-aarch64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_arm64.tar.gz")
 
-sha256sums_x86_64=('7e6627c1423acb55aa06ccb734c31f12177c60a0141b4460e1a1153c3f832c75')
-sha256sums_aarch64=('776a3ecead840811033f90d4928f1f52abd804773610d0fb12ded95a6eb50270')
+sha256sums_x86_64=('ee6325e1012e4da76d182f6241b3b5a9985e394d17b2d005683bc961f3631e25')
+sha256sums_aarch64=('7cf09ed8f491bb67101e686d3b884c0a73ab67781ebbdd0dff0d3c358e203b83')
 
 package() {
     install -Dm755 ros "${pkgdir}/usr/bin/ros"
