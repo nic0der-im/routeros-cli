@@ -2,27 +2,27 @@ class Ros < Formula
   desc "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
   homepage "https://github.com/nic0der-im/routeros-cli"
   license "MIT"
-  version "0.3.0"
+  version "0.3.3"
 
   on_macos do
     on_arm do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_darwin_arm64.tar.gz"
-      sha256 "a926d1fa2ec18b5dfb447fb448d24fed097472028ed4211ccb20fec1351e6d83"
+      sha256 "c88a48f6620d6fd8f2dc72d1042664bd7c9cf88489b593c84a2b6d01c4e8a21d"
     end
     on_intel do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_darwin_amd64.tar.gz"
-      sha256 "96b81a1c1357bd69d24125b2178de35bce179d225fad61b75d28eacfe95e18c1"
+      sha256 "2c343c08121b8d567c5ba2f7c1c7211ead475c0cf1d14aac0c3a39f091a9e56c"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_linux_arm64.tar.gz"
-      sha256 "d262b6ad1a6e8313502f4118036b46e0b15c98d67f83ed2ffe0b8a2c45347924"
+      sha256 "776a3ecead840811033f90d4928f1f52abd804773610d0fb12ded95a6eb50270"
     end
     on_intel do
       url "https://github.com/nic0der-im/routeros-cli/releases/download/v#{version}/ros_#{version}_linux_amd64.tar.gz"
-      sha256 "9bc7be59b01196c5ee377ed6ef144c6465efe4cead708f48c7e3f6ca2c9a571a"
+      sha256 "7e6627c1423acb55aa06ccb734c31f12177c60a0141b4460e1a1153c3f832c75"
     end
   end
 
@@ -38,10 +38,7 @@ class Ros < Formula
         echo 'password' | ros device add router-edge --address 192.168.88.1:8728 --username admin --password-stdin
 
       Agent read-only audit:
-        ros -d router-edge --read-only audit -o json
-
-      Completions are installed by this formula. For manual install elsewhere:
-        ros completion zsh > "${fpath[1]}/_ros"
+        ros -d router-edge --read-only audit
     EOS
   end
 
