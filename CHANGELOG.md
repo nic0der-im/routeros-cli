@@ -4,12 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-07-29
+
 ### Changed
 - `ros audit` human output is a compact boxed summary with column-aligned tables and a long `└────` close bar per section; `-o json` keeps full raw maps
 - Interface human view shows cumulative **RX/TX** from `rx-byte`/`tx-byte` (GB/MB), labeled as not live Mbps
 - SYSTEM block shows memory/storage in MB/GB, bad-blocks, and disk write sectors; optional TOP CPU via `/tool/profile` (`--skip-cpu-profile`, `--cpu-profile-sec`)
 - PPPoE/PPP/L2TP interfaces and addresses omitted by default (`--show-ppp` to include); PPP active shown as a count unless `--show-ppp`
 - `full` / `security` audit profiles include users + IP services
+- Read-only policy allows `/tool/profile` for audit CPU sampling
 
 ## [0.3.2] — 2026-07-29
 
