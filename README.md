@@ -138,7 +138,7 @@ go install github.com/nic0der-im/routeros-cli@latest
 `install.sh` respects `INSTALL_DIR` (default `/usr/local/bin`):
 
 ```sh
-INSTALL_DIR="$HOME/.local/bin" curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 ### macOS
