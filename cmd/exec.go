@@ -7,29 +7,59 @@ import (
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/output"
+	"github.com/nic0der-im/routeros-cli/internal/policy"
 	"github.com/nic0der-im/routeros-cli/internal/rosapi"
+	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
 )
 
 func newExecCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+
+	cmd := &cobra.Command{
 		Use:   "exec <command> [args...]",
 		Short: "Execute an arbitrary RouterOS command",
 		Long: `Execute any RouterOS API command directly.
 
 Examples:
-  routeros-cli exec /interface/print
-  routeros-cli exec /ip/address/print =interface=ether1
-  routeros-cli exec /system/package/print`,
+  ros exec /interface/print
+  ros exec /ip/address/print =interface=ether1
+  ros exec /system/package/print
+
+During a safe session, write commands without a known inverse require --force.`,
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			rosCmd := args[0]
 			rosArgs := args[1:]
 
 			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				if policy.IsWrite(rosCmd) {
+					if err := a.ensureWritable(rosCmd); err != nil {
+						return err
+					}
+					if err := a.ensureExecJournalable(deviceName, rosCmd, rosArgs, force); err != nil {
+						return err
+					}
+				}
+
 				result, err := c.Run(ctx, rosCmd, rosArgs...)
 				if err != nil {
 					return fmt.Errorf("executing %q: %w", rosCmd, err)
+				}
+
+				if policy.IsWrite(rosCmd) {
+					id := findIDArg(rosArgs)
+					if id == "" {
+						id = extractCreatedID(result)
+					}
+					if inv := session.BuildInverse(rosCmd, rosArgs, id); len(inv) > 0 {
+						_ = a.recordSafeChange(deviceName, session.Change{
+							Command: rosCmd,
+							Args:    rosArgs,
+							Inverse: inv,
+							Note:    "exec",
+						})
+					}
 				}
 
 				if len(result.Sentences) == 0 {
@@ -46,7 +76,6 @@ Examples:
 				}
 				gr := &rosapi.GenericResults{Items: items}
 
-				// Build a stable key order from the first sentence.
 				if len(items) > 0 {
 					keys := make([]string, 0, len(result.Sentences[0]))
 					for k := range result.Sentences[0] {
@@ -64,4 +93,24 @@ Examples:
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "allow write exec without journalable inverse during a safe session")
+	return cmd
+}
+
+func (a *App) ensureExecJournalable(deviceName, rosCmd string, rosArgs []string, force bool) error {
+	sess, err := a.Sessions.Active(deviceName)
+	if err != nil {
+		return err
+	}
+	if sess == nil || !sess.Safe {
+		return nil
+	}
+	id := findIDArg(rosArgs)
+	if inv := session.BuildInverse(rosCmd, rosArgs, id); len(inv) > 0 {
+		return nil
+	}
+	if force {
+		return nil
+	}
+	return fmt.Errorf("safe session active: exec %q has no known inverse; re-run with --force to skip journaling", rosCmd)
 }

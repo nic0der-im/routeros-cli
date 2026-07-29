@@ -37,6 +37,22 @@ export ROS_READ_ONLY=1
 export ROS_DEFAULT_OUTPUT=json
 ```
 
+## Safe sessions
+
+During writes, prefer:
+
+```sh
+ros -d router-edge session begin --safe
+# optional second terminal:
+ros -d router-edge session watch
+# ... apply changes ...
+ros -d router-edge session commit
+```
+
+`session watch` probes the API and auto-rollbacks on link loss (best-effort; not RouterOS terminal Safe Mode).
+
+JSON errors use stable `error.code` kinds: `connection`, `auth`, `config`, `read_only`, `session`, `api`, `not_found`.
+
 ## Typical prompts
 
 - "Audit `router-edge` with ros and propose optimizations (read-only)."

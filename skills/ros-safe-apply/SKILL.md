@@ -36,10 +36,11 @@ Load when the user approves applying RouterOS changes with `ros` (firewall, IP, 
 1. Confirm target: `ros device get DEV` / `device test`.
 2. Optional pre-backup: `ros -d DEV backup export --file ./DEV-$(date +%F).rsc`.
 3. `ros -d DEV session begin --safe`.
-4. Apply minimal commands; capture `.id` from create output or `--raw` gets.
-5. `ros -d DEV session status` — review journal.
-6. `ros -d DEV session commit` on success, else `session rollback`.
-7. Verify with `--read-only get ... -o json`.
+4. Optionally start `ros -d DEV session watch` in another terminal for link-loss auto-rollback.
+5. Apply minimal commands; capture `.id` from create output or `--raw` gets.
+6. `ros -d DEV session status` — review journal.
+7. `ros -d DEV session commit` on success, else `session rollback`.
+8. Verify with `--read-only get ... -o json`.
 
 ## Output Contract
 

@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "description": "CLI for MikroTik RouterOS (binary name: ros)",
+  "homepage": "https://github.com/nic0der-im/routeros-cli",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.2.0/ros_0.2.0_windows_amd64.zip",
+      "hash": "185413dfb6b9362250a047e2cfcba21792d29c07e5e9a1db58fd95b1242db464"
+    },
+    "arm64": {
+      "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v0.2.0/ros_0.2.0_windows_arm64.zip",
+      "hash": "c9d961721f2501ca5d4a4a0459f17da0830c50307f2752dea6e6038b7bfafc81"
+    }
+  },
+  "bin": "ros.exe",
+  "checkver": "github",
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v$version/ros_$version_windows_amd64.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/nic0der-im/routeros-cli/releases/download/v$version/ros_$version_windows_arm64.zip"
+      }
+    }
+  },
+  "notes": [
+    "Add a device: echo password | ros device add router-edge --address 192.168.88.1:8728 --username admin --password-stdin",
+    "Completions: ros completion powershell | Out-String | Invoke-Expression"
+  ]
+}

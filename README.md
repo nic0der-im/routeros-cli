@@ -50,13 +50,29 @@ ros -d router-edge --read-only audit -o json
 
 ### Pre-built binary (recommended)
 
-**Linux / macOS**
+**Homebrew (macOS / Linux)**
+
+```sh
+brew tap nic0der-im/tap
+brew install ros
+```
+
+**Linux / macOS (install.sh)**
 
 ```sh
 curl -sSL https://raw.githubusercontent.com/nic0der-im/routeros-cli/main/install.sh | sh
 ```
 
 **Windows** — download the zip for your arch from the [latest release](https://github.com/nic0der-im/routeros-cli/releases/latest), extract `ros.exe`, and put it on your `PATH`.
+
+**Scoop (Windows)**
+
+```powershell
+# After adding a scoop bucket that vendors scoop/ros.json from this repo:
+scoop install ros
+```
+
+**AUR (Arch)** — package template: [`aur/PKGBUILD`](aur/PKGBUILD) (`routeros-cli-bin`). Publish/update via your AUR account.
 
 | OS | Arch | Asset |
 |----|------|-------|
@@ -181,6 +197,24 @@ ros device list
 ros 0.2.0          # "dev" when built without ldflags
   commit: abc1234
   built:  2026-07-29T04:40:00Z
+```
+
+### Shell completions
+
+Cobra ships `ros completion` for bash, zsh, fish, and PowerShell:
+
+```sh
+# zsh (Homebrew formula also installs completions automatically)
+ros completion zsh > "${fpath[1]}/_ros"
+
+# bash
+ros completion bash > /usr/local/etc/bash_completion.d/ros
+
+# fish
+ros completion fish > ~/.config/fish/completions/ros.fish
+
+# powershell
+ros completion powershell | Out-String | Invoke-Expression
 ```
 
 ---
@@ -554,35 +588,25 @@ Legacy `~/.config/routeros-cli/` is migrated automatically.
 - [x] Diagnostics (`diag log|ping|neighbors`), text `backup export`
 - [x] Cross-platform release assets (linux/darwin/windows × amd64/arm64)
 
-### Packaging & distribution
+### Done (v0.3.0)
 
-- [ ] Publish **Homebrew tap** (`nic0der-im/homebrew-tap`): formula exists under `Formula/`, GoReleaser `brews:` still commented, checksums need filling after each release
-- [ ] Publish **AUR** package from `aur/PKGBUILD` (separate AUR git repo; replace `sha256sums_*='SKIP'` with release checksums)
-- [ ] Optional Windows package managers (Scoop / Chocolatey)
-- [ ] Shell completions (bash / zsh / fish / PowerShell)
+- [x] Pre-state journaling for `set` / `delete` (+ curated helpers)
+- [x] `session watch` heartbeat + auto-rollback on link loss (`auto_rollback_pending`)
+- [x] `backup binary --output` + `file get` (API contents or FTP)
+- [x] Homebrew tap (`nic0der-im/homebrew-tap`) + GoReleaser `brews`
+- [x] AUR PKGBUILD/`.SRCINFO` with real checksums (live AUR push is maintainer-side)
+- [x] Completions documented + Homebrew formula installs them
+- [x] Stable `apperr` kinds in JSON `error.code`
+- [x] Expanded domains + `nat` / `lease` helpers + richer `diag`
+- [x] Opt-in integration tests (`ROS_INTEGRATION_DEVICE`)
+- [x] Scoop + Chocolatey package templates
 
-### Safety & sessions
+### Still maintainer-side / ongoing
 
-- [ ] **Heartbeat auto-rollback** when the API link / VPN drops mid-session (RouterOS terminal Safe Mode is not exposed on the binary API; today rollback is manual/`session rollback`)
-- [ ] Stronger journaling on **all** generic writes: capture pre-state for complex `set`/`delete` so inverses are reliable beyond simple create/remove
-- [ ] Documented limits + tests for partial rollback failure modes
-
-### Backup & files
-
-- [ ] **Download binary `.backup` to local disk** (today `backup binary` only runs `/system/backup/save` on the router)
-- [ ] Fetch arbitrary `/file` contents to the workstation (FTP/API file pull helper)
-
-### CLI surface (“capa linda”)
-
-- [ ] Expand curated domains beyond the current alias set (PPP, queues, certificates, routing filters, wireless/wifiwave2, containers, etc.)
-- [ ] Friendlier high-level verbs where raw API params are painful (e.g. NAT out-interface helpers, lease cleanup recipes)
-- [ ] Richer `diag` (traceroute, bandwidth-test wrappers, torch summaries)
-
-### Agents & DX
-
-- [ ] Structured **error taxonomy** (stable machine-readable error kinds beyond exit codes 1–4)
-- [ ] Live RouterOS integration test suite in CI (opt-in against a lab device)
-- [ ] Skill pack updates as workflows harden (more references, fewer footguns)
+- [ ] Push AUR package live (`routeros-cli-bin` on aur.archlinux.org)
+- [ ] Publish Scoop bucket / Chocolatey.org package from templates
+- [ ] Expand capa linda further as field needs appear
+- [ ] Harden skill packs after more production apply workflows
 
 ### Not planned soon
 

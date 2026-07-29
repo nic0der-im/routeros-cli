@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] — 2026-07-29
+
+### Added
+- Safe-session **pre-state journaling** for `set`/`delete` (and curated NAT/lease helpers)
+- `ros session watch` heartbeat with auto-rollback + `auto_rollback_pending`
+- `ros file get` and `backup binary --output` (API contents or FTP)
+- Homebrew tap `nic0der-im/homebrew-tap`; GoReleaser publishes formula updates
+- AUR PKGBUILD/`.SRCINFO` with release checksums; Scoop + Chocolatey templates
+- `internal/apperr` stable JSON error kinds; richer `diag` + expanded domains
+- Opt-in integration tests: `ROS_INTEGRATION_DEVICE=... go test -tags=integration ./test/integration/...`
+
+### Changed
+- `recordSafeChange` only journals when session `Safe=true`
+- `exec` writes during a safe session require a known inverse or `--force`
+
 ## [0.2.0] — 2026-07-29
 
 ### Added

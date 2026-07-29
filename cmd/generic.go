@@ -10,6 +10,7 @@ import (
 	"github.com/nic0der-im/routeros-cli/internal/domains"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/nic0der-im/routeros-cli/internal/rosapi"
+	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -137,13 +138,27 @@ func runGenericSet(cmd *cobra.Command, args []string) {
 	}
 	rosCmd := pathCommand(path, "set")
 	apiArgs := parseAPIArgs(rest)
+	id := findIDArg(apiArgs)
 	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
 		if err := a.ensureWritable(rosCmd); err != nil {
 			return err
 		}
+		var pre map[string]string
+		if id != "" {
+			pre, _ = fetchPreState(ctx, c, path, id)
+		}
 		_, err := c.Run(ctx, rosCmd, apiArgs...)
 		if err != nil {
 			return err
+		}
+		if inv := session.BuildSetInverse(rosCmd, id, pre, apiArgs); len(inv) > 0 {
+			_ = a.recordSafeChange(deviceName, session.Change{
+				Command:  rosCmd,
+				Args:     apiArgs,
+				Inverse:  inv,
+				PreState: pre,
+				Note:     "set " + id,
+			})
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Updated %s on %s\n", path, deviceName)
 		return nil
@@ -171,9 +186,19 @@ func runGenericDelete(cmd *cobra.Command, args []string) {
 		if err := a.ensureWritable(rosCmd); err != nil {
 			return err
 		}
+		pre, _ := fetchPreState(ctx, c, path, id)
 		_, err := c.Run(ctx, rosCmd, apiArgs...)
 		if err != nil {
 			return err
+		}
+		if inv := session.BuildRemoveInverse(rosCmd, pre); len(inv) > 0 {
+			_ = a.recordSafeChange(deviceName, session.Change{
+				Command:  rosCmd,
+				Args:     apiArgs,
+				Inverse:  inv,
+				PreState: pre,
+				Note:     "delete " + id,
+			})
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s %s on %s\n", path, id, deviceName)
 		return nil

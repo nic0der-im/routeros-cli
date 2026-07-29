@@ -75,15 +75,19 @@ Bundled packs: `ros` (read/audit) and `ros-safe-apply` (writes via safe sessions
 
 ```
 ros --read-only audit --profile full|network|security
-ros session begin|commit|rollback|status
+ros session begin|commit|rollback|status|watch
+ros file get <name> --output ./local [--via auto|api|ftp]
+ros backup binary --file name --output ./dir
+ros nat set-out-interface --id '*1' --interface ether1
+ros lease cleanup-waiting [--dry-run]
 ```
 
-## Exit codes
+### Exit codes / error kinds
 
-| Code | Meaning |
-|------|---------|
+| Code | Kind examples |
+|------|----------------|
 | 0 | OK |
-| 1 | Command error |
-| 2 | Connection error |
-| 3 | Config error |
-| 4 | Read-only violation |
+| 1 | `api`, `session`, `not_found` |
+| 2 | `connection`, `auth` |
+| 3 | `config` |
+| 4 | `read_only` |

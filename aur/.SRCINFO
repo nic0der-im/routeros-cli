@@ -1,16 +1,18 @@
 pkgbase = routeros-cli-bin
-	pkgdesc = CLI tool for managing MikroTik RouterOS routers with structured JSON output
-	pkgver = 0.1.0
+	pkgdesc = CLI tool for managing MikroTik RouterOS routers (binary name: ros)
+	pkgver = 0.2.0
 	pkgrel = 1
 	url = https://github.com/nic0der-im/routeros-cli
 	arch = x86_64
 	arch = aarch64
 	license = MIT
 	provides = routeros-cli
+	provides = ros
 	conflicts = routeros-cli
-	source_x86_64 = routeros-cli-bin-0.1.0-x86_64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v0.1.0/routeros-cli_0.1.0_linux_amd64.tar.gz
-	sha256sums_x86_64 = d43877c4976af874a7c8d5f9fc633c7ed1e0a5512dead08b3d9d6b99217697f6
-	source_aarch64 = routeros-cli-bin-0.1.0-aarch64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v0.1.0/routeros-cli_0.1.0_linux_arm64.tar.gz
-	sha256sums_aarch64 = 0a568ab3049ac6079d301631907dac806f3cd88328e687c57ed4957e0ed39fda
+	conflicts = ros
 
 pkgname = routeros-cli-bin
+	source_x86_64 = routeros-cli-bin-0.2.0-x86_64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v0.2.0/ros_0.2.0_linux_amd64.tar.gz
+	sha256sums_x86_64 = db6f702e862c2a883d4b35ab961134a0da9552d9887a9b758d582fce46fbd794
+	source_aarch64 = routeros-cli-bin-0.2.0-aarch64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v0.2.0/ros_0.2.0_linux_arm64.tar.gz
+	sha256sums_aarch64 = 3b25b9e73170a08c621dbaa738a9c8abc718d83256b770a6e2e372e2da1de2b4

@@ -11,12 +11,15 @@ import (
 func newDiagCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diag",
-		Short: "Diagnostics: log, ping, neighbors",
+		Short: "Diagnostics: log, ping, neighbors, traceroute, torch, bandwidth-test",
 	}
 	cmd.AddCommand(
 		newDiagLogCmd(),
 		newDiagPingCmd(),
 		newDiagNeighborsCmd(),
+		newDiagTracerouteCmd(),
+		newDiagTorchCmd(),
+		newDiagBandwidthTestCmd(),
 	)
 	return cmd
 }
@@ -54,6 +57,75 @@ func newDiagNeighborsCmd() *cobra.Command {
 			runGenericGet(cmd, []string{"/ip/neighbor"})
 		},
 	}
+}
+
+func newDiagTracerouteCmd() *cobra.Command {
+	var count int
+	cmd := &cobra.Command{
+		Use:   "traceroute <address>",
+		Short: "Traceroute from the router",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			params := []string{"/tool/traceroute", "address=" + args[0], "count=" + strconv.Itoa(count)}
+			runGenericGet(cmd, params)
+		},
+	}
+	cmd.Flags().IntVar(&count, "count", 3, "probes per hop")
+	return cmd
+}
+
+func newDiagTorchCmd() *cobra.Command {
+	var iface string
+	var duration string
+	cmd := &cobra.Command{
+		Use:   "torch",
+		Short: "Short torch summary on an interface",
+		Run: func(cmd *cobra.Command, args []string) {
+			params := []string{"/tool/torch", "interface=" + iface}
+			if duration != "" {
+				params = append(params, "duration="+duration)
+			}
+			runGenericGet(cmd, params)
+		},
+	}
+	cmd.Flags().StringVar(&iface, "interface", "", "interface name")
+	cmd.Flags().StringVar(&duration, "duration", "3s", "capture duration")
+	_ = cmd.MarkFlagRequired("interface")
+	return cmd
+}
+
+func newDiagBandwidthTestCmd() *cobra.Command {
+	var direction string
+	var duration string
+	var protocol string
+	cmd := &cobra.Command{
+		Use:   "bandwidth-test <address>",
+		Short: "Run /tool/bandwidth-test toward an address (write; use with care)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			rosCmd := "/tool/bandwidth-test"
+			apiArgs := parseAPIArgs([]string{
+				"address=" + args[0],
+				"direction=" + direction,
+				"duration=" + duration,
+				"protocol=" + protocol,
+			})
+			runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				if err := a.ensureWritable(rosCmd); err != nil {
+					return err
+				}
+				result, err := c.Run(ctx, rosCmd, apiArgs...)
+				if err != nil {
+					return err
+				}
+				return renderGenericResult(a, cmd.OutOrStdout(), result, deviceName, rosCmd)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&direction, "direction", "receive", "receive|transmit|both")
+	cmd.Flags().StringVar(&duration, "duration", "5s", "test duration")
+	cmd.Flags().StringVar(&protocol, "protocol", "tcp", "tcp|udp")
+	return cmd
 }
 
 func newDeviceDiscoverCmd() *cobra.Command {

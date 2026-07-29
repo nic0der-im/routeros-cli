@@ -9,14 +9,13 @@ license=('MIT')
 provides=('routeros-cli' 'ros')
 conflicts=('routeros-cli' 'ros')
 
-# NOTE: publish this PKGBUILD in a separate AUR git repo (not this tree).
-# After v0.2.0 release, update sha256sums from GitHub checksums file.
+# Publish this PKGBUILD in a separate AUR git repo (not this tree).
 
 source_x86_64=("${pkgname}-${pkgver}-x86_64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_amd64.tar.gz")
 source_aarch64=("${pkgname}-${pkgver}-aarch64.tar.gz::https://github.com/nic0der-im/routeros-cli/releases/download/v${pkgver}/ros_${pkgver}_linux_arm64.tar.gz")
 
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('db6f702e862c2a883d4b35ab961134a0da9552d9887a9b758d582fce46fbd794')
+sha256sums_aarch64=('3b25b9e73170a08c621dbaa738a9c8abc718d83256b770a6e2e372e2da1de2b4')
 
 package() {
     install -Dm755 ros "${pkgdir}/usr/bin/ros"

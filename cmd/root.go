@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/nic0der-im/routeros-cli/internal/apperr"
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/config"
 	"github.com/nic0der-im/routeros-cli/internal/credential"
@@ -198,6 +199,7 @@ func Execute() error {
 		newFirewallCmd(),
 		newDHCPCmd(),
 		newBackupCmd(),
+		newFileCmd(),
 		newMonitorCmd(),
 		newExecCmd(),
 		newSchemaCmd(),
@@ -212,6 +214,8 @@ func Execute() error {
 		newDomainsCmd(),
 		newDiagCmd(),
 		newSkillsCmd(),
+		newNatCmd(),
+		newLeaseCmd(),
 	)
 	return rootCmd.Execute()
 }
@@ -229,7 +233,7 @@ func runWithClient(cmdInstance *cobra.Command, rosCommand string, fn func(ctx co
 
 	c, deviceName, err := a.connect(ctx)
 	if err != nil {
-		a.renderError(os.Stderr, "connection_failed", err.Error(), deviceName)
+		a.renderError(os.Stderr, string(apperr.KindConnection), err.Error(), deviceName)
 		os.Exit(ExitConnError)
 	}
 	defer func() { _ = c.Close() }()
@@ -237,10 +241,14 @@ func runWithClient(cmdInstance *cobra.Command, rosCommand string, fn func(ctx co
 	if err := fn(ctx, a, c, deviceName); err != nil {
 		var roErr *policy.ErrReadOnly
 		if errors.As(err, &roErr) {
-			a.renderError(os.Stderr, "read_only_violation", err.Error(), deviceName)
+			a.renderError(os.Stderr, string(apperr.KindReadOnly), err.Error(), deviceName)
 			os.Exit(ExitReadOnly)
 		}
-		a.renderError(os.Stderr, "command_failed", err.Error(), deviceName)
+		if kind, ok := apperr.AsKind(err); ok {
+			a.renderError(os.Stderr, string(kind), err.Error(), deviceName)
+			os.Exit(apperr.ExitCode(kind))
+		}
+		a.renderError(os.Stderr, string(apperr.KindAPI), err.Error(), deviceName)
 		os.Exit(ExitCmdError)
 	}
 }
@@ -254,13 +262,34 @@ func (a *App) ensureWritable(action string) error {
 }
 
 // recordSafeChange appends a change to the active safe session if one exists.
+// No-op when there is no session or the session was started with --safe=false.
 func (a *App) recordSafeChange(deviceName string, change session.Change) error {
 	sess, err := a.Sessions.Active(deviceName)
 	if err != nil {
 		return err
 	}
-	if sess == nil {
+	if sess == nil || !sess.Safe {
 		return nil
 	}
 	return a.Sessions.AppendChange(sess, change)
+}
+
+// fetchPreState prints a single row by .id for journaling.
+func fetchPreState(ctx context.Context, c client.Client, basePath, id string) (map[string]string, error) {
+	if id == "" {
+		return nil, nil
+	}
+	printCmd := normalizePath(basePath) + "/print"
+	result, err := c.Run(ctx, printCmd, "?.id="+id)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Sentences) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(result.Sentences[0]))
+	for k, v := range result.Sentences[0] {
+		out[k] = v
+	}
+	return out, nil
 }

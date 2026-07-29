@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -36,9 +37,24 @@ func newSetIdentityCmd() *cobra.Command {
 					return err
 				}
 
+				preName := ""
+				if res, err := c.Run(ctx, "/system/identity/print"); err == nil && len(res.Sentences) > 0 {
+					preName = res.Sentences[0]["name"]
+				}
+
 				_, err := c.Run(ctx, "/system/identity/set", "=name="+name)
 				if err != nil {
 					return fmt.Errorf("setting identity: %w", err)
+				}
+
+				if preName != "" {
+					_ = a.recordSafeChange(deviceName, session.Change{
+						Command:  "/system/identity/set",
+						Args:     []string{"=name=" + name},
+						Inverse:  []string{"/system/identity/set", "=name=" + preName},
+						PreState: map[string]string{"name": preName},
+						Note:     "set identity",
+					})
 				}
 
 				fmt.Fprintf(cmd.OutOrStdout(), "Identity set to %q on %s\n", name, deviceName)

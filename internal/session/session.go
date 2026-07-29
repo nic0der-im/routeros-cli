@@ -11,30 +11,32 @@ import (
 )
 
 const (
-	StatusActive    = "active"
-	StatusCommitted = "committed"
+	StatusActive     = "active"
+	StatusCommitted  = "committed"
 	StatusRolledBack = "rolled_back"
 )
 
 // Change records a single mutating operation and how to undo it.
 type Change struct {
-	ID        string    `json:"id"`
-	Command   string    `json:"command"`
-	Args      []string  `json:"args"`
-	Inverse   []string  `json:"inverse"` // first element is command, rest are args
-	AppliedAt time.Time `json:"applied_at"`
-	Note      string    `json:"note,omitempty"`
+	ID        string            `json:"id"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Inverse   []string          `json:"inverse"` // first element is command, rest are args
+	PreState  map[string]string `json:"pre_state,omitempty"`
+	AppliedAt time.Time         `json:"applied_at"`
+	Note      string            `json:"note,omitempty"`
 }
 
 // Session is a journal of pending changes for a device.
 type Session struct {
-	ID        string    `json:"id"`
-	Device    string    `json:"device"`
-	Safe      bool      `json:"safe"`
-	Status    string    `json:"status"`
-	StartedAt time.Time `json:"started_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Changes   []Change  `json:"changes"`
+	ID                   string    `json:"id"`
+	Device               string    `json:"device"`
+	Safe                 bool      `json:"safe"`
+	Status               string    `json:"status"`
+	AutoRollbackPending  bool      `json:"auto_rollback_pending,omitempty"`
+	StartedAt            time.Time `json:"started_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	Changes              []Change  `json:"changes"`
 }
 
 // Store persists sessions to disk under a base directory.
@@ -197,11 +199,31 @@ func (s *Store) MarkRolledBack(sess *Session) error {
 	defer s.mu.Unlock()
 
 	sess.Status = StatusRolledBack
+	sess.AutoRollbackPending = false
 	if err := s.write(sess); err != nil {
 		return err
 	}
 	_ = os.Remove(s.activePath(sess.Device))
 	return nil
+}
+
+// MarkAutoRollbackPending flags the session so the next connect can finish rollback.
+func (s *Store) MarkAutoRollbackPending(sess *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess.Status != StatusActive {
+		return fmt.Errorf("session %q is not active", sess.ID)
+	}
+	sess.AutoRollbackPending = true
+	return s.write(sess)
+}
+
+// ClearAutoRollbackPending clears the pending flag after a successful or abandoned rollback.
+func (s *Store) ClearAutoRollbackPending(sess *Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess.AutoRollbackPending = false
+	return s.write(sess)
 }
 
 // BuildInverse constructs a simple inverse for common RouterOS mutations.

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/filexfer"
 	"github.com/spf13/cobra"
 )
 
@@ -67,26 +69,29 @@ Otherwise the export is printed to stdout.`,
 
 func newBackupBinaryCmd() *cobra.Command {
 	var backupName string
+	var outputPath string
+	var via string
 
 	cmd := &cobra.Command{
 		Use:   "binary",
-		Short: "Create a binary backup on the router",
+		Short: "Create a binary backup on the router (optionally download it)",
 		Long: `Create a binary backup file on the router via /system/backup/save.
 
 The --file flag sets the backup name on the router (without extension).
-Defaults to "routeros-cli-backup".`,
+Use --output to download the .backup to the local disk (API contents or FTP).`,
 		Run: func(cmd *cobra.Command, args []string) {
 			runWithClient(cmd, "/system/backup/save", func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+				if err := a.ensureWritable("/system/backup/save"); err != nil {
+					return err
+				}
 				_, err := c.Run(ctx, "/system/backup/save", "=name="+backupName)
 				if err != nil {
 					return fmt.Errorf("creating binary backup on %q: %w", deviceName, err)
 				}
 
-				// Confirm the backup file exists on the router.
 				fileName := backupName + ".backup"
 				result, err := c.Run(ctx, "/file/print", "?name="+fileName)
 				if err != nil {
-					// The backup was created but we could not verify.
 					fmt.Fprintf(cmd.OutOrStdout(), "Backup %q created on %q (verification query failed: %v)\n", fileName, deviceName, err)
 					return nil
 				}
@@ -98,24 +103,43 @@ Defaults to "routeros-cli-backup".`,
 					fmt.Fprintf(cmd.OutOrStdout(), "Backup command sent to %q (file: %s)\n", deviceName, fileName)
 				}
 
+				if outputPath == "" {
+					return nil
+				}
+				out := outputPath
+				if st, err := os.Stat(out); err == nil && st.IsDir() {
+					out = filepath.Join(out, fileName)
+				}
+				_, dev, err := a.Inventory.Resolve(flagDevice)
+				if err != nil {
+					return err
+				}
+				pass, err := a.Creds.Get(deviceName)
+				if err != nil {
+					return err
+				}
+				n, err := filexfer.Download(ctx, c, fileName, out, filexfer.Via(via), hostOnly(dev.Address), dev.Username, pass)
+				if err != nil {
+					return fmt.Errorf("downloading backup: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Downloaded backup to %q (%d bytes)\n", out, n)
 				return nil
 			})
 		},
 	}
 
 	cmd.Flags().StringVar(&backupName, "file", defaultBackupName, "backup name on the router (without .backup extension)")
+	cmd.Flags().StringVar(&outputPath, "output", "", "local path or directory to download the .backup")
+	cmd.Flags().StringVar(&via, "via", "auto", "download via: auto|api|ftp")
 
 	return cmd
 }
 
 // extractExportText pulls the configuration text from a /export result.
-// The RouterOS API may return the data in different sentence fields depending
-// on firmware version: commonly "ret", "message", or as raw sentence values.
 func extractExportText(result *client.Result) string {
 	var parts []string
 
 	for _, s := range result.Sentences {
-		// Try the most common field names in priority order.
 		for _, key := range []string{"ret", "message"} {
 			if v, ok := s[key]; ok && v != "" {
 				parts = append(parts, v)
@@ -131,8 +155,6 @@ func extractExportText(result *client.Result) string {
 		return text
 	}
 
-	// Fallback: if sentences exist but none of the known keys matched,
-	// concatenate all values from every sentence to avoid silent data loss.
 	for _, s := range result.Sentences {
 		for _, v := range s {
 			if v != "" {

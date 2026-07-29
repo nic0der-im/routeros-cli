@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
+	"github.com/nic0der-im/routeros-cli/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -63,9 +65,22 @@ func newDeleteByIDCmd(use, rosCmd, label string) *cobra.Command {
 					return err
 				}
 
+				base := strings.TrimSuffix(rosCmd, "/remove")
+				pre, _ := fetchPreState(ctx, c, base, id)
+
 				_, err := c.Run(ctx, rosCmd, "=.id="+id)
 				if err != nil {
 					return fmt.Errorf("deleting %s %s: %w", label, id, err)
+				}
+
+				if inv := session.BuildRemoveInverse(rosCmd, pre); len(inv) > 0 {
+					_ = a.recordSafeChange(deviceName, session.Change{
+						Command:  rosCmd,
+						Args:     []string{"=.id=" + id},
+						Inverse:  inv,
+						PreState: pre,
+						Note:     "delete " + id,
+					})
 				}
 
 				fmt.Fprintf(cmd.OutOrStdout(), "%s %s deleted (%s)\n", label, id, deviceName)

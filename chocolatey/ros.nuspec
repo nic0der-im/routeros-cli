@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Template for Chocolatey package. Publish via a chocolatey.org package maintainer account. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>ros</id>
+    <version>0.2.0</version>
+    <title>ros (routeros-cli)</title>
+    <authors>nic0der-im</authors>
+    <owners>nic0der-im</owners>
+    <projectUrl>https://github.com/nic0der-im/routeros-cli</projectUrl>
+    <licenseUrl>https://github.com/nic0der-im/routeros-cli/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>CLI for MikroTik RouterOS devices over the native API. Binary name: ros.</description>
+    <tags>mikrotik routeros networking cli</tags>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

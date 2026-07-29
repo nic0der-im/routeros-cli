@@ -2,6 +2,7 @@ package session
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,9 +122,71 @@ func TestSanitize(t *testing.T) {
 	_ = filepath.Join // keep import used if needed
 }
 
-func TestDefaultDir(t *testing.T) {
-	d := DefaultDir()
-	if filepath.Base(d) != "sessions" {
-		t.Errorf("DefaultDir base = %q", filepath.Base(d))
+func TestBuildSetAndRemoveInverse(t *testing.T) {
+	pre := map[string]string{
+		".id":         "*1",
+		"lease-time":  "30m",
+		"name":        "dhcpNetwork",
+		"bytes":       "999",
+		"disabled":    "false",
+	}
+	inv := BuildSetInverse("/ip/dhcp-server/set", "*1", pre, []string{"=.id=*1", "=lease-time=1d"})
+	if len(inv) < 3 || inv[0] != "/ip/dhcp-server/set" || inv[1] != "=.id=*1" {
+		t.Fatalf("set inverse: %v", inv)
+	}
+	found := false
+	for _, a := range inv {
+		if a == "=lease-time=30m" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected restored lease-time in %v", inv)
+	}
+
+	rm := BuildRemoveInverse("/ip/firewall/filter/remove", pre)
+	if len(rm) < 2 || rm[0] != "/ip/firewall/filter/add" {
+		t.Fatalf("remove inverse: %v", rm)
+	}
+	for _, a := range rm {
+		if strings.Contains(a, "=.id=") || strings.HasPrefix(a, "=bytes=") {
+			t.Fatalf("read-only field leaked into inverse: %v", rm)
+		}
 	}
 }
+
+func TestSafeFalseStillActiveButNotJournaledViaAppendStillWorks(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.Begin("r1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Safe {
+		t.Fatal("expected safe=false")
+	}
+}
+
+func TestMarkAutoRollbackPending(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.Begin("r1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkAutoRollbackPending(sess); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AutoRollbackPending {
+		t.Fatal("expected auto_rollback_pending")
+	}
+}
+

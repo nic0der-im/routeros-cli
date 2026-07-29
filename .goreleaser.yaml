@@ -31,19 +31,21 @@ archives:
       - README.md
       - LICENSE
 
-# Uncomment after creating nic0der-im/homebrew-tap repo and HOMEBREW_TAP_TOKEN secret:
-# brews:
-#   - repository:
-#       owner: nic0der-im
-#       name: homebrew-tap
-#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-#     directory: Formula
-#     homepage: "https://github.com/nic0der-im/routeros-cli"
-#     description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
-#     license: "MIT"
-#     install: |
-#       bin.install "ros"
-#       bin.install_symlink "ros" => "routeros-cli"
+brews:
+  - repository:
+      owner: nic0der-im
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/nic0der-im/routeros-cli"
+    description: "CLI tool for managing MikroTik RouterOS routers with structured JSON output"
+    license: "MIT"
+    install: |
+      bin.install "ros"
+      bin.install_symlink "ros" => "routeros-cli"
+      generate_completions_from_executable(bin/"ros", "completion")
+    test: |
+      assert_match "ros", shell_output("#{bin}/ros version")
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
