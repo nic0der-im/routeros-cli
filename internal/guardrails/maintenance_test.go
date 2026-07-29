@@ -29,7 +29,10 @@ func TestParseMaintenanceWindow_HumanList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ww := w.(weeklyWindow)
+	ww, ok := w.(weeklyWindow)
+	if !ok {
+		t.Fatalf("got %T", w)
+	}
 	if !ww.days[time.Saturday] || !ww.days[time.Sunday] || ww.days[time.Monday] {
 		t.Fatalf("days: %v", ww.days)
 	}
@@ -40,7 +43,10 @@ func TestParseMaintenanceWindow_Explicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ww := w.(weeklyWindow)
+	ww, ok := w.(weeklyWindow)
+	if !ok {
+		t.Fatalf("got %T", w)
+	}
 	if !ww.days[time.Saturday] || !ww.days[time.Sunday] {
 		t.Fatalf("days: %v", ww.days)
 	}
@@ -54,7 +60,10 @@ func TestParseMaintenanceWindow_AbsoluteRFC3339(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aw := w.(absoluteWindow)
+	aw, ok := w.(absoluteWindow)
+	if !ok {
+		t.Fatalf("got %T", w)
+	}
 	if aw.start.Hour() != 22 || aw.end.Hour() != 6 {
 		t.Fatalf("got start=%v end=%v", aw.start, aw.end)
 	}

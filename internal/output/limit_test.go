@@ -53,7 +53,7 @@ func TestLimitRenderable(t *testing.T) {
 		t.Fatal("limit 0 should be no-op")
 	}
 	got, trunc = LimitRenderable(data, 10)
-	if trunc {
+	if trunc || got != data {
 		t.Fatal("limit > rows should not truncate")
 	}
 	got, trunc = LimitRenderable(data, 1)

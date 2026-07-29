@@ -437,10 +437,7 @@ func isNetwatchDown(row map[string]string) bool {
 		case "down", "host-down", "unreachable", "timeout", "fail", "failed":
 			return true
 		}
-		if strings.Contains(status, "down") {
-			return true
-		}
-		return false
+		return strings.Contains(status, "down")
 	}
 	up := strings.ToLower(val(row, "up"))
 	return up == "false" || up == "no"
