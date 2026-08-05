@@ -123,7 +123,8 @@ func redactAPIArg(a string) string {
 		prefix = "?"
 		rest = a[1:]
 	default:
-		return a
+		// Client.Run also accepts unprefixed key=value arguments.
+		prefix = ""
 	}
 	i := strings.IndexByte(rest, '=')
 	if i <= 0 {

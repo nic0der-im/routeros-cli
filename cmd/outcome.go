@@ -158,12 +158,19 @@ func (a *App) emitWriteOutcome(w io.Writer, deviceName string, spec writeOutcome
 		DryRun:  spec.Action == ActionDryRun,
 	})
 
+	safeArgs := redactAPIArgs(spec.Args)
+	safePre := output.RedactRecord(spec.Pre)
+	safeDiff := (*diff.Diff)(nil)
+	if spec.Diff != nil {
+		d := redactDiff(*spec.Diff, spec.Args)
+		safeDiff = &d
+	}
 	summary := spec.Summary
 	if summary == "" {
 		summary = outcomeSummary(spec.Action, spec.Verb, spec.Path, spec.ID)
 	}
 	displayCmd := spec.Command
-	if human := formatHumanAPIArgs(spec.Args); human != "" {
+	if human := formatHumanAPIArgs(safeArgs); human != "" {
 		displayCmd += " " + human
 	}
 
@@ -174,23 +181,23 @@ func (a *App) emitWriteOutcome(w io.Writer, deviceName string, spec writeOutcome
 			"verb":    spec.Verb,
 			"path":    spec.Path,
 			"command": spec.Command,
-			"args":    spec.Args,
+			"args":    safeArgs,
 		}
 		if spec.ID != "" {
 			payload["id"] = spec.ID
 		}
-		if spec.Diff != nil {
-			payload["diff"] = *spec.Diff
+		if safeDiff != nil {
+			payload["diff"] = *safeDiff
 		}
-		if spec.Pre != nil {
-			payload["pre"] = spec.Pre
+		if safePre != nil {
+			payload["pre"] = safePre
 		}
 		count := 1
 		if spec.Action == ActionNoChange || spec.Action == ActionAlreadyExists {
 			count = 0
 		}
-		if spec.Diff != nil {
-			count = len(spec.Diff.ToCreate) + len(spec.Diff.ToUpdate) + len(spec.Diff.ToRemove)
+		if safeDiff != nil {
+			count = len(safeDiff.ToCreate) + len(safeDiff.ToUpdate) + len(safeDiff.ToRemove)
 		}
 		meta := a.newMeta(deviceName, displayCmd, count)
 		meta.Action = spec.Action

@@ -115,6 +115,24 @@ ros -d router-edge delete firewall/filter --comment allow-web
 ros -d router-edge enable firewall/mangle --comment mark-conn
 ```
 
+### User passwords over stdin
+
+Only generic `/user` mutations accept `--password-stdin`; it is not a generic
+secret-injection mechanism. It reads one non-empty password line and keeps the
+value out of caller arguments, dry-run/output, audit, errors, and safe-session
+journal/status surfaces.
+
+```sh
+op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' \
+  | ros -d homeServer-CHR-Lab create user name=tech group=read address=192.0.2.10 --password-stdin
+op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' \
+  | ros -d homeServer-CHR-Lab set user .id=*2 --password-stdin
+```
+
+Do not combine the flag with positional `password=...`; use the existing
+positional form only when its caller-side handling is acceptable. Redacted
+mutation views use `***`.
+
 ### Firewall filter/mangle by comment (B5)
 
 Mutations on `/ip/firewall/filter` and `/ip/firewall/mangle` accept **`--comment <exact>`** as a stable alternative to `.id=*N` (exact, case-sensitive match on the `comment` field). Zero matches → error; multiple matches → refused (use unique comments or `.id`). `--dry-run` resolves the comment first, then previews.

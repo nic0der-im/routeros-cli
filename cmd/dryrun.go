@@ -46,6 +46,7 @@ type dryRunSpec struct {
 
 // formatHumanAPIArgs turns =key=value into key=value for human summaries.
 func formatHumanAPIArgs(apiArgs []string) string {
+	apiArgs = redactAPIArgs(apiArgs)
 	parts := make([]string, 0, len(apiArgs))
 	for _, a := range apiArgs {
 		a = strings.TrimSpace(a)
@@ -146,6 +147,45 @@ func buildSemanticDiff(spec dryRunSpec) diff.Diff {
 	}
 }
 
+func redactSemanticKey(key string, secrets ...string) string {
+	for _, secret := range secrets {
+		key = strings.ReplaceAll(key, secret, output.RedactedPlaceholder)
+	}
+	parts := strings.Split(key, "|")
+	for i, part := range parts {
+		idx := strings.IndexByte(part, '=')
+		if idx <= 0 {
+			continue
+		}
+		parts[i] = part[:idx+1] + output.RedactValue(part[:idx], part[idx+1:])
+	}
+	return strings.Join(parts, "|")
+}
+
+func redactDiff(d diff.Diff, args ...[]string) diff.Diff {
+	var secrets []string
+	if len(args) > 0 {
+		secrets = secretValuesFromAPIArgs(args[0])
+	}
+	redactItems := func(items []diff.Item) []diff.Item {
+		if items == nil {
+			return nil
+		}
+		out := make([]diff.Item, len(items))
+		for i, item := range items {
+			item.Key = redactSemanticKey(item.Key, secrets...)
+			item.Before = output.RedactRecord(item.Before)
+			item.After = output.RedactRecord(item.After)
+			out[i] = item
+		}
+		return out
+	}
+	d.ToCreate = redactItems(d.ToCreate)
+	d.ToUpdate = redactItems(d.ToUpdate)
+	d.ToRemove = redactItems(d.ToRemove)
+	return d
+}
+
 func propChangesFromDiff(d diff.Diff) []propChange {
 	var out []propChange
 	for _, item := range d.ToUpdate {
@@ -173,14 +213,17 @@ func (a *App) emitDryRun(w io.Writer, deviceName string, spec dryRunSpec) error 
 		DryRun:  true,
 	})
 
-	summary := dryRunSummary(spec)
-	sem := buildSemanticDiff(spec)
+	safeSpec := spec
+	safeSpec.Args = redactAPIArgs(spec.Args)
+	safeSpec.Pre = output.RedactRecord(spec.Pre)
+	summary := dryRunSummary(safeSpec)
+	sem := redactDiff(buildSemanticDiff(safeSpec))
 	changes := propChangesFromDiff(sem)
 	if len(changes) == 0 && (spec.Verb == "set" || spec.Verb == "enable" || spec.Verb == "disable") {
-		changes = propertyChanges(spec.Pre, spec.Args)
+		changes = propertyChanges(safeSpec.Pre, safeSpec.Args)
 	}
 	displayCmd := spec.Command
-	if human := formatHumanAPIArgs(spec.Args); human != "" {
+	if human := formatHumanAPIArgs(safeSpec.Args); human != "" {
 		displayCmd += " " + human
 	}
 
@@ -191,14 +234,14 @@ func (a *App) emitDryRun(w io.Writer, deviceName string, spec dryRunSpec) error 
 			"verb":    spec.Verb,
 			"path":    spec.Path,
 			"command": spec.Command,
-			"args":    spec.Args,
+			"args":    safeSpec.Args,
 			"diff":    sem,
 		}
 		if len(changes) > 0 {
 			payload["changes"] = changes
 		}
-		if spec.Pre != nil {
-			payload["pre"] = spec.Pre
+		if safeSpec.Pre != nil {
+			payload["pre"] = safeSpec.Pre
 		}
 		meta := a.newMeta(deviceName, displayCmd, len(sem.ToCreate)+len(sem.ToUpdate)+len(sem.ToRemove))
 		meta.Action = dryRunAction

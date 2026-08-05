@@ -18,7 +18,8 @@ func newSetCmd() *cobra.Command {
   ros set identity --name "central-hub-buenos-aires"
   ros set /ip/dhcp-server .id=*1 lease-time=1d
   ros set /ip/cloud ddns-enabled=auto update-time=false
-  ros set user .id=*2 password=secret
+  op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' | \
+    ros -d homeServer-CHR-Lab set user .id=*2 --password-stdin
   ros set firewall/nat .id=*1 out-interface=ether1
   ros set firewall/filter --comment allow-web disabled=yes
   ros set firewall/mangle --comment mark-conn new-packet-mark=web
@@ -26,10 +27,21 @@ func newSetCmd() *cobra.Command {
 Singleton menus (no .id) are journaled in safe sessions via a pre-/print snapshot.
 For firewall/filter and firewall/mangle, --comment <exact> resolves to .id
 (refuse if 0 or many matches). Use positional comment=value to change the comment field.
-Use --dry-run to preview without writing (comment is resolved before preview).`,
-		Run: runGenericSet,
+Use --password-stdin only for generic set user mutations; it reads one
+non-empty password line without placing the secret in caller arguments.
+Use --dry-run to preview without writing (the password is redacted; comment
+is resolved before preview).`,
+		RunE: runGenericSet,
 	}
 	attachDryRunFlag(cmd)
+	cmd.PersistentFlags().Bool(passwordStdinFlag, false, "read the RouterOS user password from stdin (user mutations only)")
+	cmd.PersistentPreRunE = func(runCmd *cobra.Command, _ []string) error {
+		passwordStdin, _ := cmd.PersistentFlags().GetBool(passwordStdinFlag)
+		if passwordStdin && runCmd != cmd {
+			return fmt.Errorf("--password-stdin is only supported for generic set user mutations")
+		}
+		return nil
+	}
 	attachCommentTargetFlag(cmd)
 	cmd.AddCommand(newSetIdentityCmd())
 	return cmd
