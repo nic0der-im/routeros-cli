@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nic0der-im/routeros-cli/internal/apperr"
+	"github.com/nic0der-im/routeros-cli/internal/audit"
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/config"
 	"github.com/nic0der-im/routeros-cli/internal/credential"
@@ -363,6 +364,9 @@ func runWithClient(cmdInstance *cobra.Command, rosCommand string, fn func(ctx co
 	}
 }
 
+// runWithClientFn is replaceable by package tests; production uses runWithClient.
+var runWithClientFn = runWithClient
+
 // ensureWritable returns an error if the app is in read-only mode or production
 // guardrails block the write. Dry-run callers must skip this (preview only).
 func (a *App) ensureWritable(deviceName, action string) error {
@@ -449,7 +453,39 @@ func (a *App) deviceConfig(deviceName string) config.DeviceConfig {
 
 // recordSafeChange appends a change to the active safe session if one exists.
 // No-op when there is no session or the session was started with --safe=false.
+func sanitizeSessionChange(change session.Change) session.Change {
+	change.Args = redactAPIArgs(change.Args)
+	change.PreState = output.RedactRecord(change.PreState)
+	if len(change.Inverse) > 0 {
+		clean := []string{change.Inverse[0]}
+		for _, arg := range change.Inverse[1:] {
+			redacted := audit.RedactAPIArgs([]string{arg})[0]
+			if redacted != arg {
+				continue
+			}
+			clean = append(clean, arg)
+		}
+		change.Inverse = clean
+	}
+	return change
+}
+
+func sanitizeSession(sess *session.Session) *session.Session {
+	if sess == nil {
+		return nil
+	}
+	copy := *sess
+	copy.Changes = make([]session.Change, len(sess.Changes))
+	for i, change := range sess.Changes {
+		copy.Changes[i] = sanitizeSessionChange(change)
+	}
+	return &copy
+}
+
+// recordSafeChange appends a change to the active safe session if one exists.
+// No-op when the session was started with --safe=false.
 func (a *App) recordSafeChange(deviceName string, change session.Change) error {
+	change = sanitizeSessionChange(change)
 	sess, err := a.Sessions.Active(deviceName)
 	if err != nil {
 		return err

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Secure `--password-stdin` support for generic `create user` and `set user` mutations with fail-closed input validation.
+
 ### Changed
 - README: v0.5 feature showcase, safe-write spine, agent prompts, FAQ vs MCP/SSH/Winbox
 

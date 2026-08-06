@@ -7,10 +7,9 @@ var readOnlyKeys = map[string]struct{}{
 	".id": {}, "id": {}, "bytes": {}, "packets": {}, "dynamic": {}, "invalid": {},
 	"running": {}, "slave": {}, "inactive": {}, "actual-interface": {},
 	"active-address": {}, "active-mac-address": {}, "active-client-id": {},
-	"active-server": {}, "expires-after": {}, "last-seen": {}, "status": {},
+	"active-server": {}, "expires-after": {}, "last-seen": {}, "status": {}, "password": {},
 	"last-logged-in": {}, "radius": {}, "creation-time": {},
 }
-
 
 // IsReadOnlyField reports whether a printed field should be omitted from restore args.
 func IsReadOnlyField(key string) bool {
@@ -31,7 +30,7 @@ func BuildSetInverse(setCommand, id string, preState map[string]string, changedA
 	}
 	for _, a := range changedArgs {
 		key, ok := argKey(a)
-		if !ok || key == ".id" || key == "id" {
+		if !ok || key == ".id" || key == "id" || strings.EqualFold(key, "password") {
 			continue
 		}
 		if old, exists := preState[key]; exists {

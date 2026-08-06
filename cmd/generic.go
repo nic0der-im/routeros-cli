@@ -101,29 +101,45 @@ func runGenericGet(cmd *cobra.Command, args []string, where []string) {
 	})
 }
 
-func runGenericCreate(cmd *cobra.Command, args []string) {
+func runGenericCreate(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		_ = cmd.Help()
-		return
+		return nil
 	}
 	path, rest, err := resolveResourcePath(args)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
-		return
+		return nil
 	}
 	rosCmd := pathCommand(path, "add")
 	apiArgs := parseAPIArgs(rest)
-	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
-		return applyCreateMutation(ctx, a, c, cmd, deviceName, path, rosCmd, apiArgs)
+	passwordFlag := cmd.Flag(passwordStdinFlag)
+	password, err := readMutationPassword("create", path, apiArgs, passwordFlag != nil && passwordFlag.Value.String() == "true")
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
+		return err
+	}
+	runWithClientFn(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+		return applyCreateMutationWithPassword(ctx, a, c, cmd, deviceName, path, rosCmd, apiArgs, password)
 	})
+	return nil
 }
 
 // applyCreateMutation creates a resource, or emits a dry-run preview (no write/journal).
 // Idempotent: DiffCreate already_exists → action=already_exists without writing.
 func applyCreateMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string) error {
+	return applyCreateMutationWithPassword(ctx, a, c, cmd, deviceName, path, rosCmd, apiArgs, "")
+}
+
+func applyCreateMutationWithPassword(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string, password string) error {
+	if password != "" && normalizePath(path) != "/user" {
+		return fmt.Errorf("--password-stdin is only supported for generic create user mutations")
+	}
+	executionArgs := appendPasswordArg(apiArgs, password)
+	displayArgs := redactAPIArgs(executionArgs)
 	if isDryRun(cmd) {
 		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
-			Verb: "create", Path: path, Command: rosCmd, Args: apiArgs,
+			Verb: "create", Path: path, Command: rosCmd, Args: displayArgs,
 		})
 	}
 	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
@@ -141,7 +157,7 @@ func applyCreateMutation(ctx context.Context, a *App, c client.Client, cmd *cobr
 				Verb:    "create",
 				Path:    path,
 				Command: rosCmd,
-				Args:    apiArgs,
+				Args:    displayArgs,
 				ID:      existingID,
 				Summary: fmt.Sprintf("Already exists: %s on %s", path, deviceName),
 				Diff:    &d,
@@ -149,11 +165,11 @@ func applyCreateMutation(ctx context.Context, a *App, c client.Client, cmd *cobr
 		}
 	}
 
-	result, err := c.Run(ctx, rosCmd, apiArgs...)
+	result, err := c.Run(ctx, rosCmd, executionArgs...)
 	if err != nil {
-		return apperr.MaybeAmbiguousWrite(err)
+		return apperr.MaybeAmbiguousWrite(redactErrorWithAPIArgs(err, executionArgs))
 	}
-	if err := recordCreateChange(a, deviceName, rosCmd, apiArgs, result); err != nil {
+	if err := recordCreateChange(a, deviceName, rosCmd, executionArgs, result); err != nil {
 		return err
 	}
 	id := extractCreatedID(result)
@@ -166,29 +182,29 @@ func applyCreateMutation(ctx context.Context, a *App, c client.Client, cmd *cobr
 		Verb:    "create",
 		Path:    path,
 		Command: rosCmd,
-		Args:    apiArgs,
+		Args:    displayArgs,
 		ID:      id,
 		Summary: summary,
 		Diff:    createDiff,
 	})
 }
 
-func runGenericSet(cmd *cobra.Command, args []string) {
+func runGenericSet(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		_ = cmd.Help()
-		return
+		return nil
 	}
 	path, rest, err := resolveResourcePath(args)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
-		return
+		return nil
 	}
 	rosCmd := pathCommand(path, "set")
 	apiArgs := parseAPIArgs(rest)
 	apiArgs, tip, err := normalizeCloudDDNSArgs(path, apiArgs)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
-		return
+		return nil
 	}
 	if tip != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), tip)
@@ -197,14 +213,20 @@ func runGenericSet(cmd *cobra.Command, args []string) {
 	if comment != "" {
 		if findIDArg(apiArgs) != "" {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Error: specify either .id or --comment, not both")
-			return
+			return nil
 		}
 		if !supportsCommentAsID(path) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: --comment targeting is only supported for firewall/filter and firewall/mangle, not %s\n", path)
-			return
+			return nil
 		}
 	}
-	runWithClient(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
+	passwordFlag := cmd.Flag(passwordStdinFlag)
+	password, err := readMutationPassword("set", path, apiArgs, passwordFlag != nil && passwordFlag.Value.String() == "true")
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %s\n", err)
+		return err
+	}
+	runWithClientFn(cmd, rosCmd, func(ctx context.Context, a *App, c client.Client, deviceName string) error {
 		argsForMut := apiArgs
 		if comment != "" {
 			resolved, err := resolveIDByComment(ctx, c, path, comment)
@@ -213,26 +235,36 @@ func runGenericSet(cmd *cobra.Command, args []string) {
 			}
 			argsForMut = ensureIDArg(apiArgs, resolved)
 		}
-		return applySetMutation(ctx, a, c, cmd, deviceName, path, rosCmd, argsForMut)
+		return applySetMutationWithPassword(ctx, a, c, cmd, deviceName, path, rosCmd, argsForMut, password)
 	})
+	return nil
 }
 
 // applySetMutation updates a resource, or emits a dry-run preview (no write/journal).
 // DiffSet with no property changes → action=no_change without writing.
 func applySetMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string) error {
+	return applySetMutationWithPassword(ctx, a, c, cmd, deviceName, path, rosCmd, apiArgs, "")
+}
+
+func applySetMutationWithPassword(ctx context.Context, a *App, c client.Client, cmd *cobra.Command, deviceName, path, rosCmd string, apiArgs []string, password string) error {
+	if password != "" && normalizePath(path) != "/user" {
+		return fmt.Errorf("--password-stdin is only supported for generic set user mutations")
+	}
+	executionArgs := appendPasswordArg(apiArgs, password)
+	displayArgs := redactAPIArgs(executionArgs)
 	id := findIDArg(apiArgs)
 	// Optional read for property diffs / journaling context.
 	pre, _ := fetchPreState(ctx, c, path, id)
 	if isDryRun(cmd) {
 		return a.emitDryRun(cmd.OutOrStdout(), deviceName, dryRunSpec{
-			Verb: "set", Path: path, Command: rosCmd, Args: apiArgs, Pre: pre,
+			Verb: "set", Path: path, Command: rosCmd, Args: displayArgs, Pre: pre,
 		})
 	}
 	if err := a.ensureWritable(deviceName, rosCmd); err != nil {
 		return err
 	}
 
-	desired := argsToPropMap(apiArgs)
+	desired := argsToPropMap(executionArgs)
 	action, d := classifySetOutcome(path, pre, desired)
 	if action == ActionNoChange {
 		return a.emitWriteOutcome(cmd.OutOrStdout(), deviceName, writeOutcomeSpec{
@@ -240,7 +272,7 @@ func applySetMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.C
 			Verb:    "set",
 			Path:    path,
 			Command: rosCmd,
-			Args:    apiArgs,
+			Args:    displayArgs,
 			ID:      id,
 			Summary: fmt.Sprintf("No change: %s on %s", path, deviceName),
 			Diff:    &d,
@@ -248,18 +280,21 @@ func applySetMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.C
 		})
 	}
 
-	_, err := c.Run(ctx, rosCmd, apiArgs...)
+	_, err := c.Run(ctx, rosCmd, executionArgs...)
 	if err != nil {
-		return apperr.MaybeAmbiguousWrite(err)
+		return apperr.MaybeAmbiguousWrite(redactErrorWithAPIArgs(err, executionArgs))
 	}
-	if inv := session.BuildSetInverse(rosCmd, id, pre, apiArgs); len(inv) > 0 {
+	if inv := session.BuildSetInverse(rosCmd, id, pre, executionArgs); len(inv) > 0 || hasPasswordArg(executionArgs) {
 		note := "set singleton"
 		if id != "" {
 			note = "set " + id
 		}
+		if hasPasswordArg(executionArgs) {
+			note += " (password not auto-rolled back)"
+		}
 		_ = a.recordSafeChange(deviceName, session.Change{
 			Command:  rosCmd,
-			Args:     apiArgs,
+			Args:     executionArgs,
 			Inverse:  inv,
 			PreState: pre,
 			Note:     note,
@@ -270,7 +305,7 @@ func applySetMutation(ctx context.Context, a *App, c client.Client, cmd *cobra.C
 		Verb:    "set",
 		Path:    path,
 		Command: rosCmd,
-		Args:    apiArgs,
+		Args:    displayArgs,
 		ID:      id,
 		Summary: fmt.Sprintf("Updated %s on %s", path, deviceName),
 		Diff:    &d,

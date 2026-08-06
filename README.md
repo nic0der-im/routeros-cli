@@ -230,6 +230,21 @@ Examples: `firewall/filter` → `/ip/firewall/filter`, `dns/static` → `/ip/dns
 
 Params: `key=value` becomes RouterOS `=key=value`; target a row with `.id=*1` or (filter/mangle) `--comment`; filter with `?=disabled=false` / `get --where`.
 
+### User passwords over stdin
+
+Generic `create user` and `set user` accept `--password-stdin`. The flag reads
+one non-empty password line, removes only its line terminator, and keeps the
+secret out of caller arguments and rendered output:
+
+```sh
+printf '%s\n' "$ROUTEROS_USER_PASSWORD" \
+  | ros -d router-edge create user name=tech group=read address=192.0.2.10 --password-stdin
+```
+
+The flag is intentionally limited to the RouterOS `/user` domain. Do not combine
+it with positional `password=...`; dry-run, audit, and safe-session views show
+only `***`.
+
 Full reference: [docs/COMMANDS.md](docs/COMMANDS.md).
 
 ---

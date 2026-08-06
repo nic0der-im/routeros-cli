@@ -19,12 +19,23 @@ func newCreateCmd() *cobra.Command {
   ros create firewall address-list --list blacklist --address 1.2.3.4
   ros create dns static --name router.lan --address 192.168.88.1
   ros create /ip/firewall/address-list list=blacklist address=1.2.3.4
-  ros create user name=tech group=read password=...
+  printf '%s\n' "$ROUTEROS_USER_PASSWORD" | \
+    ros -d router-edge create user name=tech group=read address=192.0.2.10 --password-stdin
 
-Use --dry-run to preview without writing.`,
-		Run: runGenericCreate,
+--password-stdin is supported only by generic create user mutations. It reads
+one non-empty password line without placing the secret in caller arguments;
+use --dry-run to preview with the password redacted.`,
+		RunE: runGenericCreate,
 	}
 	attachDryRunFlag(cmd)
+	cmd.PersistentFlags().Bool(passwordStdinFlag, false, "read the RouterOS user password from stdin (user mutations only)")
+	cmd.PersistentPreRunE = func(runCmd *cobra.Command, _ []string) error {
+		passwordStdin, _ := cmd.PersistentFlags().GetBool(passwordStdinFlag)
+		if passwordStdin && runCmd != cmd {
+			return fmt.Errorf("--password-stdin is only supported for generic create user mutations")
+		}
+		return nil
+	}
 	cmd.AddCommand(
 		newCreateIPCmd(),
 		newCreateFirewallCmd(),

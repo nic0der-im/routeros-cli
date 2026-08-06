@@ -457,25 +457,26 @@ func newSessionStatusCmd() *cobra.Command {
 				fmt.Fprintf(w, "WARNING: auto_rollback_pending — run: ros -d %s session rollback\n", name)
 			}
 
+			safeSess := sanitizeSession(sess)
 			if a.OutFormat == output.FormatJSON {
-				return a.renderRawJSON(w, sess, a.newMeta(name, "session status", len(sess.Changes)))
+				return a.renderRawJSON(w, safeSess, a.newMeta(name, "session status", len(safeSess.Changes)))
 			}
 
-			fmt.Fprintf(w, "Session %s\n", sess.ID)
-			fmt.Fprintf(w, "  Device:     %s\n", sess.Device)
-			fmt.Fprintf(w, "  Status:     %s\n", sess.Status)
-			fmt.Fprintf(w, "  Safe:       %v\n", sess.Safe)
-			fmt.Fprintf(w, "  Pending RB: %v\n", sess.AutoRollbackPending)
-			if sess.BackupDir != "" {
-				fmt.Fprintf(w, "  Backup:     %s\n", sess.BackupDir)
+			fmt.Fprintf(w, "Session %s\n", safeSess.ID)
+			fmt.Fprintf(w, "  Device:     %s\n", safeSess.Device)
+			fmt.Fprintf(w, "  Status:     %s\n", safeSess.Status)
+			fmt.Fprintf(w, "  Safe:       %v\n", safeSess.Safe)
+			fmt.Fprintf(w, "  Pending RB: %v\n", safeSess.AutoRollbackPending)
+			if safeSess.BackupDir != "" {
+				fmt.Fprintf(w, "  Backup:     %s\n", safeSess.BackupDir)
 			}
-			if sess.Note != "" {
-				fmt.Fprintf(w, "  Note:       %s\n", sess.Note)
+			if safeSess.Note != "" {
+				fmt.Fprintf(w, "  Note:       %s\n", safeSess.Note)
 			}
-			fmt.Fprintf(w, "  Started:    %s\n", sess.StartedAt.Format(time.RFC3339))
-			fmt.Fprintf(w, "  Updated:    %s\n", sess.UpdatedAt.Format(time.RFC3339))
-			fmt.Fprintf(w, "  Changes:    %d\n", len(sess.Changes))
-			for i, ch := range sess.Changes {
+			fmt.Fprintf(w, "  Started:    %s\n", safeSess.StartedAt.Format(time.RFC3339))
+			fmt.Fprintf(w, "  Updated:    %s\n", safeSess.UpdatedAt.Format(time.RFC3339))
+			fmt.Fprintf(w, "  Changes:    %d\n", len(safeSess.Changes))
+			for i, ch := range safeSess.Changes {
 				fmt.Fprintf(w, "    %d. %s %v\n", i+1, ch.Command, ch.Args)
 			}
 			return nil
