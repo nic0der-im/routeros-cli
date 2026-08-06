@@ -19,8 +19,8 @@ func newCreateCmd() *cobra.Command {
   ros create firewall address-list --list blacklist --address 1.2.3.4
   ros create dns static --name router.lan --address 192.168.88.1
   ros create /ip/firewall/address-list list=blacklist address=1.2.3.4
-  op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' | \
-    ros -d homeServer-CHR-Lab create user name=tech group=read address=192.0.2.10 --password-stdin
+  printf '%s\n' "$ROUTEROS_USER_PASSWORD" | \
+    ros -d router-edge create user name=tech group=read address=192.0.2.10 --password-stdin
 
 --password-stdin is supported only by generic create user mutations. It reads
 one non-empty password line without placing the secret in caller arguments;

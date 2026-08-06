@@ -123,10 +123,10 @@ value out of caller arguments, dry-run/output, audit, errors, and safe-session
 journal/status surfaces.
 
 ```sh
-op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' \
-  | ros -d homeServer-CHR-Lab create user name=tech group=read address=192.0.2.10 --password-stdin
-op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' \
-  | ros -d homeServer-CHR-Lab set user .id=*2 --password-stdin
+printf '%s\n' "$ROUTEROS_USER_PASSWORD" \
+  | ros -d router-edge create user name=tech group=read address=192.0.2.10 --password-stdin
+printf '%s\n' "$ROUTEROS_USER_PASSWORD" \
+  | ros -d router-edge set user .id=*2 --password-stdin
 ```
 
 Do not combine the flag with positional `password=...`; use the existing

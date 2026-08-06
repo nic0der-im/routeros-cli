@@ -237,8 +237,8 @@ one non-empty password line, removes only its line terminator, and keeps the
 secret out of caller arguments and rendered output:
 
 ```sh
-op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' \
-  | ros -d homeServer-CHR-Lab create user name=tech group=read address=192.0.2.10 --password-stdin
+printf '%s\n' "$ROUTEROS_USER_PASSWORD" \
+  | ros -d router-edge create user name=tech group=read address=192.0.2.10 --password-stdin
 ```
 
 The flag is intentionally limited to the RouterOS `/user` domain. Do not combine

@@ -18,8 +18,8 @@ func newSetCmd() *cobra.Command {
   ros set identity --name "central-hub-buenos-aires"
   ros set /ip/dhcp-server .id=*1 lease-time=1d
   ros set /ip/cloud ddns-enabled=auto update-time=false
-  op read 'op://DigitalNOA/CloudISP CHR Canary Temporary User 2026-08-05/password' | \
-    ros -d homeServer-CHR-Lab set user .id=*2 --password-stdin
+  printf '%s\n' "$ROUTEROS_USER_PASSWORD" | \
+    ros -d router-edge set user .id=*2 --password-stdin
   ros set firewall/nat .id=*1 out-interface=ether1
   ros set firewall/filter --comment allow-web disabled=yes
   ros set firewall/mangle --comment mark-conn new-packet-mark=web
