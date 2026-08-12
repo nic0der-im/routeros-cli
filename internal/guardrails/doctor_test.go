@@ -51,6 +51,32 @@ func TestLoadLastDoctorAt_Missing(t *testing.T) {
 	}
 }
 
+func TestRemoveDoctorState(t *testing.T) {
+	doctorStateDirForTest = t.TempDir()
+	t.Cleanup(func() { doctorStateDirForTest = "" })
+
+	if err := RecordDoctorAt("edge core", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveDoctorState("edge core"); err != nil {
+		t.Fatalf("RemoveDoctorState: %v", err)
+	}
+	if _, err := os.Stat(DoctorStatePath("edge core")); !os.IsNotExist(err) {
+		t.Errorf("state file still present: %v", err)
+	}
+	if _, ok, err := LoadLastDoctorAt("edge core"); err != nil || ok {
+		t.Errorf("state still readable: ok=%v err=%v", ok, err)
+	}
+
+	// Removing state for a device that never ran doctor succeeds.
+	if err := RemoveDoctorState("ghost"); err != nil {
+		t.Errorf("missing state: %v", err)
+	}
+	if err := RemoveDoctorState(""); err == nil {
+		t.Error("empty device name should error")
+	}
+}
+
 func TestEvaluateDoctorGate(t *testing.T) {
 	now := time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC)
 	fresh := now.Add(-10 * time.Minute)

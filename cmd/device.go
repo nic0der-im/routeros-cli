@@ -3,14 +3,18 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nic0der-im/routeros-cli/internal/client"
 	"github.com/nic0der-im/routeros-cli/internal/config"
+	"github.com/nic0der-im/routeros-cli/internal/credential"
 	"github.com/nic0der-im/routeros-cli/internal/device"
+	"github.com/nic0der-im/routeros-cli/internal/guardrails"
 	"github.com/nic0der-im/routeros-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -235,18 +239,28 @@ Two modes:
 
 func newDeviceRemoveCmd() *cobra.Command {
 	var (
-		force   bool
-		confirm string
+		force        bool
+		purgeBackups bool
+		confirm      string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "remove <name>",
-		Short: "Remove a device from the inventory",
-		Long: `Remove a device from the local inventory (and stored credentials).
+		Use:     "remove <name>",
+		Aliases: []string{"delete", "rm"},
+		Short:   "Remove a device from the inventory",
+		Long: `Remove a device from the local inventory.
+
+Also purges the device's local state: stored credentials (keychain), doctor
+freshness state, and safe-session locks and journals. Pre-session config
+backups are kept unless --purge-backups is given.
+
+Removal is refused while the device has an active safe session; commit or
+roll it back first, or pass --force.
 
 ` + confirmLongHelp + `
---force skips the interactive [y/N] prompt only.`,
-		Args: cobra.ExactArgs(1),
+--force skips the interactive [y/N] prompt and the active-session guard.`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeDeviceNamesArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := loadApp()
 			if err != nil {
@@ -263,6 +277,13 @@ func newDeviceRemoveCmd() *cobra.Command {
 			}
 
 			if !force {
+				if sess, err := a.Sessions.Active(name); err == nil && sess != nil {
+					return fmt.Errorf(
+						"device %q has an active safe session (%s) with %d change(s); run `ros -d %s session commit` or `session rollback` first (or --force)",
+						name, sess.ID, len(sess.Changes), name,
+					)
+				}
+
 				fmt.Fprintf(cmd.OutOrStdout(), "Remove device %q? [y/N] ", name)
 				scanner := bufio.NewScanner(os.Stdin)
 				if scanner.Scan() {
@@ -277,15 +298,52 @@ func newDeviceRemoveCmd() *cobra.Command {
 				return err
 			}
 
-			// Also remove credentials.
-			_ = a.Creds.Delete(name)
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Device %q removed\n", name)
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Device %q removed\n", name)
+			// Best-effort purge of per-device local state. The inventory entry
+			// is already gone, so a cleanup failure must not fail the command;
+			// report it instead so the user can clean up by hand.
+			if err := a.Creds.Delete(name); err == nil {
+				fmt.Fprintln(out, "  credentials: removed from keychain")
+			} else if errors.Is(err, credential.ErrNotFound) {
+				fmt.Fprintln(out, "  credentials: none stored")
+			} else {
+				fmt.Fprintf(out, "  credentials: WARNING %v\n", err)
+			}
+
+			if err := guardrails.RemoveDoctorState(name); err != nil {
+				fmt.Fprintf(out, "  doctor state: WARNING %v\n", err)
+			} else {
+				fmt.Fprintln(out, "  doctor state: cleared")
+			}
+
+			if n, err := a.Sessions.PurgeDevice(name); err != nil {
+				fmt.Fprintf(out, "  sessions: WARNING %v\n", err)
+			} else {
+				fmt.Fprintf(out, "  sessions: %d journal(s) and any active lock removed\n", n)
+			}
+
+			backupDir := filepath.Join(defaultBackupsDir(), sanitizeBackupDevice(name))
+			switch _, statErr := os.Stat(backupDir); {
+			case statErr != nil:
+				// no backups for this device; nothing to report
+			case purgeBackups:
+				if err := os.RemoveAll(backupDir); err != nil {
+					fmt.Fprintf(out, "  backups: WARNING %v\n", err)
+				} else {
+					fmt.Fprintf(out, "  backups: purged %s\n", backupDir)
+				}
+			default:
+				fmt.Fprintf(out, "  backups: kept at %s (use --purge-backups to delete)\n", backupDir)
+			}
+
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVar(&force, "force", false, "skip interactive [y/N] prompt (still requires --confirm)")
+	cmd.Flags().BoolVar(&force, "force", false, "skip interactive [y/N] prompt and active-session guard (still requires --confirm)")
+	cmd.Flags().BoolVar(&purgeBackups, "purge-backups", false, "also delete local pre-session config backups for this device")
 	registerConfirmFlag(cmd, &confirm)
 
 	return cmd
@@ -328,9 +386,10 @@ func newDeviceListCmd() *cobra.Command {
 
 func newDeviceUseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "use <name>",
-		Short: "Set the default device",
-		Args:  cobra.ExactArgs(1),
+		Use:               "use <name>",
+		Short:             "Set the default device",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeDeviceNamesArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
@@ -351,9 +410,10 @@ func newDeviceUseCmd() *cobra.Command {
 
 func newDeviceTestCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test [name]",
-		Short: "Test connectivity to a device",
-		Args:  cobra.MaximumNArgs(1),
+		Use:               "test [name]",
+		Short:             "Test connectivity to a device",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeDeviceNamesArg,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) > 0 {
 				flagDevice = args[0]
@@ -390,9 +450,10 @@ func newDeviceAuthSetCmd() *cobra.Command {
 	var passwordStdin bool
 
 	cmd := &cobra.Command{
-		Use:   "set <name>",
-		Short: "Set or rotate the stored password for a device",
-		Args:  cobra.ExactArgs(1),
+		Use:               "set <name>",
+		Short:             "Set or rotate the stored password for a device",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeDeviceNamesArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
@@ -434,9 +495,10 @@ func newDeviceAuthSetCmd() *cobra.Command {
 
 func newDeviceGetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <name|id|ip>",
-		Short: "Show a single device from the inventory",
-		Args:  cobra.ExactArgs(1),
+		Use:               "get <name|id|ip>",
+		Short:             "Show a single device from the inventory",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeDeviceNamesArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := loadApp()
 			if err != nil {

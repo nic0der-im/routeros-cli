@@ -96,6 +96,10 @@ func init() {
 	pf.BoolVar(&flagRawJSON, "raw", false, "include raw RouterOS fields in JSON (secrets unredacted)")
 	pf.BoolVar(&flagForce, "skip-doctor-gate", false, "break-glass: skip doctor freshness gate on writes (also: ROS_SKIP_DOCTOR_GATE=1)")
 	pf.IntVar(&flagLimit, "limit", 0, "max rows for list output (0 = unlimited)")
+
+	// Device-name completion for `-d`. Cobra only errors here on an unknown
+	// flag name, which is impossible directly after registration.
+	_ = rootCmd.RegisterFlagCompletionFunc("device", completeDeviceNames)
 }
 
 // loadApp initializes the App from flags and config.

@@ -40,7 +40,7 @@ Typed device-name gate for high-impact actions. `--confirm NAME` must equal the 
 |---------|--------|
 | `ros system reboot` | Required; `--force` skips interactive `[y/N]` only |
 | `ros file remove` | Required |
-| `ros device remove` | Required; `--force` skips interactive `[y/N]` only |
+| `ros device remove` (aliases `delete`, `rm`) | Required; `--force` skips interactive `[y/N]` **and** the active-session guard |
 | `ros lease cleanup-waiting` | Required for real deletes; `--dry-run` skips the gate |
 
 Generic single-row `ros delete … .id=*N` does **not** require `--confirm` (too noisy). Deletes without `.id` are refused (no mass-delete selectors).
@@ -182,7 +182,8 @@ Also available via kubectl-style trees: `ros get|create|delete dns static`, `ros
 ros device add                          # interactive wizard
 ros device add NAME --address host:port --password-stdin   # agentic
 ros device auth set <name>
-ros device list|get|use|test|remove
+ros device list|get|use|test
+ros device remove <name> --confirm <name> [--force] [--purge-backups]
 ros device discover                     # MNDP neighbors via current device
 ros device import --from winbox [--file ...] [--dry-run] [--with-passwords] [--force]
                [--api-port 8728] [--keep-winbox-port]
@@ -190,6 +191,24 @@ ros device import --from winbox [--file ...] [--dry-run] [--with-passwords] [--f
 
 Winbox import auto-detects OS paths (macOS/Linux/Windows) for Winbox 4 `Addresses.cdb` and Winbox 3 `.WBX`.
 By default `--api-port 8728` is applied to every host (Winbox GUI ports are ignored).
+
+`device remove` (aliases `delete`, `rm`) purges every local trace of the device:
+the inventory entry, the default-device pointer, the keychain credential, the
+doctor freshness state (`~/.config/ros/state/<device>.doctor`), and all safe-session
+locks and journals (`~/.config/ros/sessions/`). Pre-session config backups under
+`~/.config/ros/backups/<device>/` are **kept** unless `--purge-backups` is given.
+Removal is refused while the device has an active safe session; commit or roll it
+back first, or pass `--force`.
+
+## Shell completion
+
+```sh
+source <(ros completion bash)      # zsh, fish, powershell also supported
+```
+
+Device names complete for `-d/--device` and for the `<name>` argument of
+`device remove|use|test|get` and `device auth set`. When no name matches the
+typed prefix, device ids and addresses are offered instead.
 
 ## Diagnostics
 
@@ -320,7 +339,7 @@ ros nat set-out-interface --id '*1' --interface ether1
 ros lease cleanup-waiting --confirm DEV
 ros lease cleanup-waiting --dry-run
 ros system reboot --confirm DEV [--force]
-ros device remove DEV --confirm DEV [--force]
+ros device remove DEV --confirm DEV [--force] [--purge-backups]
 ```
 
 ### Exit codes / error kinds

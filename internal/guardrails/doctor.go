@@ -67,6 +67,19 @@ func DoctorStatePath(deviceName string) string {
 	return filepath.Join(DoctorStateDir(), sanitizeStateDevice(deviceName)+".doctor")
 }
 
+// RemoveDoctorState deletes the LastDoctorAt file for a device. It is a no-op
+// when the file does not exist, so deleting a device that never ran doctor
+// succeeds.
+func RemoveDoctorState(deviceName string) error {
+	if deviceName == "" {
+		return fmt.Errorf("empty device name")
+	}
+	if err := os.Remove(DoctorStatePath(deviceName)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing doctor state: %w", err)
+	}
+	return nil
+}
+
 func sanitizeStateDevice(name string) string {
 	out := make([]rune, 0, len(name))
 	for _, r := range name {

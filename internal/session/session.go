@@ -156,6 +156,50 @@ func (s *Store) Get(id string) (*Session, error) {
 	return s.readUnlocked(id)
 }
 
+// PurgeDevice removes the active lock and every session journal belonging to
+// device. It is used when a device is deleted from the inventory so no
+// orphaned locks or journals remain. Returns the number of journals removed.
+func (s *Store) PurgeDevice(device string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := os.Remove(s.activePath(device)); err != nil && !os.IsNotExist(err) {
+		return 0, fmt.Errorf("removing active session lock: %w", err)
+	}
+
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading session dir: %w", err)
+	}
+
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(s.dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var sess Session
+		if err := json.Unmarshal(data, &sess); err != nil {
+			continue
+		}
+		if sess.Device != device {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("removing session %q: %w", sess.ID, err)
+		}
+		removed++
+	}
+	return removed, nil
+}
+
 func (s *Store) readUnlocked(id string) (*Session, error) {
 	data, err := os.ReadFile(s.path(id))
 	if err != nil {

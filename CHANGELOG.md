@@ -2,7 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.7.0] — 2026-08-12
+
+Usability and cleanup cut: device-name shell completion across the CLI, and a
+`device remove` that actually removes every local trace of a device.
+
+### Added
+- Shell completion of device names for `-d/--device` and for the `<name>` argument of `device remove|use|test|get` and `device auth set` (falls back to device ids/addresses when no name matches)
+- `device remove --purge-backups` to also delete `~/.config/ros/backups/<device>/`
+- `device remove` aliases `delete` and `rm`
+
+### Fixed
+- Device tab completion produced nothing: no `RegisterFlagCompletionFunc` on `-d/--device` and no `ValidArgsFunction` on any device command, so every shell fell back to filename completion
+- `device remove` now purges all per-device local state: doctor freshness state (`~/.config/ros/state/<device>.doctor`) and safe-session locks and journals, which previously leaked after deletion
+- `device remove` refuses to delete a device with an active safe session (bypass with `--force`), so pending changes are no longer orphaned without a rollback path
+- `RunE` command errors were swallowed entirely (`SilenceErrors` with no printer in `main`); they now print to stderr
+
+## [0.6.0] — 2026-08-07
 
 ### Added
 - Secure `--password-stdin` support for generic `create user` and `set user` mutations with fail-closed input validation.

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,5 +254,61 @@ func TestMarkAutoRollbackPending(t *testing.T) {
 	}
 	if !got.AutoRollbackPending {
 		t.Fatal("expected auto_rollback_pending")
+	}
+}
+
+func TestPurgeDevice(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	// Two journals for the target device (one closed, one still active) and
+	// one belonging to a device that must survive the purge.
+	closed, err := store.Begin("edge core", true)
+	if err != nil {
+		t.Fatalf("Begin closed: %v", err)
+	}
+	if err := store.Commit(closed); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	active, err := store.Begin("edge core", true)
+	if err != nil {
+		t.Fatalf("Begin active: %v", err)
+	}
+	other, err := store.Begin("branch-lab", true)
+	if err != nil {
+		t.Fatalf("Begin other: %v", err)
+	}
+
+	n, err := store.PurgeDevice("edge core")
+	if err != nil {
+		t.Fatalf("PurgeDevice: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("removed %d journals, want 2", n)
+	}
+
+	for _, id := range []string{closed.ID, active.ID} {
+		if _, err := os.Stat(filepath.Join(dir, id+".json")); !os.IsNotExist(err) {
+			t.Errorf("journal %s still present: %v", id, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "active-edge_core.lock")); !os.IsNotExist(err) {
+		t.Errorf("active lock still present: %v", err)
+	}
+
+	// The unrelated device keeps both its journal and its active lock.
+	if _, err := os.Stat(filepath.Join(dir, other.ID+".json")); err != nil {
+		t.Errorf("unrelated journal removed: %v", err)
+	}
+	if got, err := store.Active("branch-lab"); err != nil || got == nil {
+		t.Errorf("unrelated active session lost: got=%v err=%v", got, err)
+	}
+
+	// Purging a device with no state is a no-op, not an error.
+	if n, err := store.PurgeDevice("never-seen"); err != nil || n != 0 {
+		t.Errorf("purge of unknown device: n=%d err=%v", n, err)
 	}
 }
