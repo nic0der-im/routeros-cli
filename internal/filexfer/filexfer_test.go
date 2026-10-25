@@ -78,6 +78,51 @@ func TestCaptureApplyRestoreSSH(t *testing.T) {
 	}
 }
 
+// RouterOS 7.25 names the allowlist "available-from" and lists dynamic
+// per-connection rows alongside the static ssh service.
+func TestCaptureApplyRestoreSSHAvailableFrom(t *testing.T) {
+	stub := &stubClient{sentences: []map[string]string{
+		{
+			".id":     "*4F",
+			"name":    "ssh",
+			"port":    "22",
+			"dynamic": "true",
+			"remote":  "192.168.88.11:41308",
+		},
+		{
+			".id":            "*4",
+			"name":           "ssh",
+			"port":           "22",
+			"available-from": "192.168.88.0/24,10.10.10.0/24",
+			"disabled":       "false",
+			"dynamic":        "false",
+		},
+	}}
+	st, err := CaptureSSHService(context.Background(), stub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ID != "*4" || st.Address != "192.168.88.0/24,10.10.10.0/24" {
+		t.Fatalf("%+v", st)
+	}
+	if err := ApplySSHAccess(context.Background(), stub, st, "192.168.88.11/32"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreSSHService(context.Background(), stub, st); err != nil {
+		t.Fatal(err)
+	}
+	last := stub.calls[len(stub.calls)-1]
+	found := false
+	for _, a := range last {
+		if a == "=available-from=192.168.88.0/24,10.10.10.0/24" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("restore args: %v", last)
+	}
+}
+
 func TestDownloadAPI(t *testing.T) {
 	dir := t.TempDir()
 	out := dir + "/x.rsc"
