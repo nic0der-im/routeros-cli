@@ -15,6 +15,9 @@ type SSHServiceState struct {
 	Port     string
 	Address  string
 	Disabled string
+	// AddressKey is the allowlist property name the router uses:
+	// "available-from" on newer RouterOS 7, "address" on older releases.
+	AddressKey string
 }
 
 // CaptureSSHService reads the ssh service row.
@@ -23,17 +26,36 @@ func CaptureSSHService(ctx context.Context, c client.Client) (*SSHServiceState, 
 	if err != nil {
 		return nil, fmt.Errorf("reading ssh service: %w", err)
 	}
-	if len(result.Sentences) == 0 {
+	// Newer RouterOS also lists one dynamic row per active connection; skip those.
+	var s map[string]string
+	for _, row := range result.Sentences {
+		if row["dynamic"] != "true" {
+			s = row
+			break
+		}
+	}
+	if s == nil {
 		return nil, fmt.Errorf("ssh service not found")
 	}
-	s := result.Sentences[0]
+	key := "address"
+	if _, ok := s["available-from"]; ok {
+		key = "available-from"
+	}
 	return &SSHServiceState{
-		ID:       s[".id"],
-		Name:     s["name"],
-		Port:     s["port"],
-		Address:  s["address"],
-		Disabled: s["disabled"],
+		ID:         s[".id"],
+		Name:       s["name"],
+		Port:       s["port"],
+		Address:    s[key],
+		Disabled:   s["disabled"],
+		AddressKey: key,
 	}, nil
+}
+
+func (s *SSHServiceState) addressKey() string {
+	if s.AddressKey == "" {
+		return "address"
+	}
+	return s.AddressKey
 }
 
 // ApplySSHAccess enables SSH (if needed) and sets the address allowlist.
@@ -47,7 +69,7 @@ func ApplySSHAccess(ctx context.Context, c client.Client, state *SSHServiceState
 	} else {
 		args = append(args, "=numbers=ssh")
 	}
-	args = append(args, "=disabled=no", "=address="+address)
+	args = append(args, "=disabled=no", "="+state.addressKey()+"="+address)
 	_, err := c.Run(ctx, "/ip/service/set", args...)
 	if err != nil {
 		return fmt.Errorf("applying ephemeral ssh allowlist: %w", err)
@@ -70,7 +92,7 @@ func RestoreSSHService(ctx context.Context, c client.Client, state *SSHServiceSt
 	if disabled == "" {
 		disabled = "false"
 	}
-	args = append(args, "=disabled="+disabled, "=address="+state.Address)
+	args = append(args, "=disabled="+disabled, "="+state.addressKey()+"="+state.Address)
 	_, err := c.Run(ctx, "/ip/service/set", args...)
 	if err != nil {
 		return fmt.Errorf("restoring ssh service: %w", err)
